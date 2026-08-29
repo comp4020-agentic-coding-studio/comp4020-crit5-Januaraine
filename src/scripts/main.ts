@@ -4,7 +4,8 @@ import {
   createInitialBall,
   createInitialPaddle,
   movePaddle,
-  stepBall,
+  stepGame,
+  togglePause,
   type Ball,
   type Paddle,
 } from "./dvd-game";
@@ -52,6 +53,7 @@ function initGame(
   restartButton: HTMLButtonElement,
   winOverlay: HTMLDivElement,
   restartWinButton: HTMLButtonElement,
+  pauseOverlay: HTMLDivElement,
 ): void {
   ctx.imageSmoothingEnabled = false;
 
@@ -68,6 +70,7 @@ function initGame(
   let paddle: Paddle = createInitialPaddle(bounds);
   let colorIndex = 0;
   let running = true;
+  let paused = false;
   let flashUntil = 0;
   let lastTime = performance.now();
   let pointerX: number | null = null;
@@ -86,8 +89,10 @@ function initGame(
     pointerX = null;
     flashUntil = 0;
     running = true;
+    paused = false;
     overlay.hidden = true;
     winOverlay.hidden = true;
+    pauseOverlay.hidden = true;
     lastTime = performance.now();
     requestAnimationFrame(loop);
   }
@@ -115,17 +120,19 @@ function initGame(
     const dt = Math.min((time - lastTime) / 1000, 0.05);
     lastTime = time;
 
-    let dx = 0;
-    if (keys.left) dx -= PADDLE_SPEED * dt;
-    if (keys.right) dx += PADDLE_SPEED * dt;
-    if (dx !== 0) paddle = movePaddle(paddle, dx, bounds);
+    if (!paused) {
+      let dx = 0;
+      if (keys.left) dx -= PADDLE_SPEED * dt;
+      if (keys.right) dx += PADDLE_SPEED * dt;
+      if (dx !== 0) paddle = movePaddle(paddle, dx, bounds);
 
-    if (pointerX !== null) {
-      const targetX = pointerX - paddle.w / 2;
-      paddle = movePaddle(paddle, targetX - paddle.x, bounds);
+      if (pointerX !== null) {
+        const targetX = pointerX - paddle.w / 2;
+        paddle = movePaddle(paddle, targetX - paddle.x, bounds);
+      }
     }
 
-    const result = stepBall(ball, paddle, bounds, dt);
+    const result = stepGame(ball, paddle, bounds, dt, paused);
     ball = result.ball;
 
     if (result.wallHit) {
@@ -157,6 +164,10 @@ function initGame(
     if (MOVE_KEYS.has(event.code)) event.preventDefault();
     if (event.code === "KeyA" || event.code === "ArrowLeft") keys.left = true;
     if (event.code === "KeyD" || event.code === "ArrowRight") keys.right = true;
+    if (event.code === "Escape" || event.code === "KeyP") {
+      paused = togglePause(paused, running);
+      pauseOverlay.hidden = !paused;
+    }
     if (!running && (event.code === "Space" || event.code === "Enter")) reset();
   });
 
@@ -201,8 +212,9 @@ const overlay = document.querySelector<HTMLDivElement>("#game-over");
 const restartButton = document.querySelector<HTMLButtonElement>("#restart");
 const winOverlay = document.querySelector<HTMLDivElement>("#game-win");
 const restartWinButton = document.querySelector<HTMLButtonElement>("#restart-win");
+const pauseOverlay = document.querySelector<HTMLDivElement>("#game-paused");
 
-if (canvas && overlay && restartButton && winOverlay && restartWinButton) {
+if (canvas && overlay && restartButton && winOverlay && restartWinButton && pauseOverlay) {
   const ctx = canvas.getContext("2d");
-  if (ctx) initGame(canvas, ctx, overlay, restartButton, winOverlay, restartWinButton);
+  if (ctx) initGame(canvas, ctx, overlay, restartButton, winOverlay, restartWinButton, pauseOverlay);
 }

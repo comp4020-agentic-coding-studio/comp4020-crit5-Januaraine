@@ -5,6 +5,8 @@ import {
   createInitialPaddle,
   movePaddle,
   stepBall,
+  stepGame,
+  togglePause,
   type Ball,
   type Bounds,
 } from "../src/scripts/dvd-game";
@@ -117,6 +119,50 @@ describe("stepBall: paddle band", () => {
     const result = stepBall(ball, paddle, bounds, 0.01);
     expect(result.gameOver).toBe(false);
     expect(result.bounced).toBe(false);
+  });
+});
+
+describe("stepGame: pause", () => {
+  it("freezes the ball and suspends every collision/win/game-over check while paused", () => {
+    const paddle = createInitialPaddle(bounds);
+    // A ball that would otherwise win (top-left corner) this step.
+    const ball = makeBall({ x: 1, y: 1, vx: -100, vy: -100 });
+    const result = stepGame(ball, paddle, bounds, 0.1, true);
+
+    expect(result.ball).toEqual(ball);
+    expect(result.wallHit).toBe(false);
+    expect(result.cornerHit).toBe(false);
+    expect(result.win).toBe(false);
+    expect(result.bounced).toBe(false);
+    expect(result.gameOver).toBe(false);
+  });
+
+  it("also freezes a ball that would otherwise trigger game-over", () => {
+    const paddle = createInitialPaddle(bounds);
+    const ball = makeBall({ x: 0, y: paddle.y + paddle.h + 1, vy: 100 });
+    const result = stepGame(ball, paddle, bounds, 0.1, true);
+
+    expect(result.ball).toEqual(ball);
+    expect(result.gameOver).toBe(false);
+  });
+
+  it("behaves exactly like stepBall when not paused", () => {
+    const paddle = createInitialPaddle(bounds);
+    const ball = makeBall({ x: 1, y: 1, vx: -100, vy: -100 });
+
+    expect(stepGame(ball, paddle, bounds, 0.1, false)).toEqual(stepBall(ball, paddle, bounds, 0.1));
+  });
+});
+
+describe("togglePause", () => {
+  it("toggles pause on and off while the game is running", () => {
+    expect(togglePause(false, true)).toBe(true);
+    expect(togglePause(true, true)).toBe(false);
+  });
+
+  it("is a no-op once the game has ended, so it can't revive a finished win/game-over state", () => {
+    expect(togglePause(false, false)).toBe(false);
+    expect(togglePause(true, false)).toBe(true);
   });
 });
 

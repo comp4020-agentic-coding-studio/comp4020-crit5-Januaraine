@@ -143,3 +143,36 @@ export function stepBall(ball: Ball, paddle: Paddle, bounds: Bounds, dt: number)
     gameOver,
   };
 }
+
+const FROZEN_STEP: Omit<StepResult, "ball"> = {
+  wallHit: false,
+  cornerHit: false,
+  win: false,
+  bounced: false,
+  gameOver: false,
+};
+
+/**
+ * Same contract as stepBall, but when `paused` is true the ball is returned
+ * completely unchanged and no wall/corner/paddle/win/game-over condition can
+ * fire — pausing freezes the logo in place and suspends all state updates.
+ */
+export function stepGame(
+  ball: Ball,
+  paddle: Paddle,
+  bounds: Bounds,
+  dt: number,
+  paused: boolean,
+): StepResult {
+  if (paused) return { ball, ...FROZEN_STEP };
+  return stepBall(ball, paddle, bounds, dt);
+}
+
+/**
+ * Toggles the paused flag, but only while the game is still running — once
+ * the game has ended (win or game-over), pause/resume presses are no-ops so
+ * they can't be mistaken for a restart or otherwise disturb the final state.
+ */
+export function togglePause(paused: boolean, running: boolean): boolean {
+  return running ? !paused : paused;
+}

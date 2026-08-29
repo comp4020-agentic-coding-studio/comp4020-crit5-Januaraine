@@ -81,6 +81,10 @@ h1 {
   color: var(--accent);
 }
 
+.game-paused {
+  color: var(--fg);
+}
+
 .game-over button {
   font-family: inherit;
   font-size: 1rem;
