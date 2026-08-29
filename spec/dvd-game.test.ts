@@ -3,7 +3,11 @@ import {
   BALL_HEIGHT,
   BALL_WIDTH,
   createInitialPaddle,
+  createInputState,
   movePaddle,
+  resolvePaddleDelta,
+  setInputKey,
+  setInputPointer,
   stepBall,
   stepGame,
   togglePause,
@@ -175,5 +179,92 @@ describe("movePaddle", () => {
   it("clamps to the right edge", () => {
     const paddle = createInitialPaddle(bounds);
     expect(movePaddle(paddle, 10000, bounds).x).toBe(bounds.w - paddle.w);
+  });
+});
+
+describe("input state: keyboard/mouse independence", () => {
+  // Regression test for a bug where, once the mouse had ever been used, the
+  // pointer's last (now stale) position kept being re-applied every frame
+  // and silently overrode keyboard movement — keyboard appeared "dead" after
+  // any mouse use. Keyboard and mouse must remain independent input methods:
+  // whichever was used most recently drives the paddle.
+  const paddle = createInitialPaddle(bounds);
+  const speed = 390;
+  const dt = 0.1;
+
+  it("does not move the paddle before any input has been received", () => {
+    const state = createInputState();
+    expect(resolvePaddleDelta(state, paddle, speed, dt)).toBe(0);
+  });
+
+  it("moves the paddle from keyboard input alone", () => {
+    let state = createInputState();
+    state = setInputKey(state, "right", true);
+    expect(resolvePaddleDelta(state, paddle, speed, dt)).toBeCloseTo(speed * dt);
+  });
+
+  it("moves the paddle to follow the pointer once the mouse has been used", () => {
+    let state = createInputState();
+    state = setInputPointer(state, paddle.x + paddle.w / 2 + 50);
+    expect(resolvePaddleDelta(state, paddle, speed, dt)).toBeCloseTo(50);
+  });
+
+  it("regains keyboard control immediately after mouse use (keyboard -> mouse -> keyboard)", () => {
+    let state = createInputState();
+
+    // Keyboard first: works on its own.
+    state = setInputKey(state, "right", true);
+    expect(resolvePaddleDelta(state, paddle, speed, dt)).toBeCloseTo(speed * dt);
+    state = setInputKey(state, "right", false);
+
+    // Switch to mouse: pointer now drives the paddle.
+    state = setInputPointer(state, paddle.x + paddle.w / 2 + 50);
+    expect(resolvePaddleDelta(state, paddle, speed, dt)).toBeCloseTo(50);
+
+    // Switch back to keyboard: pressing a move key must regain control even
+    // though the stale pointer position is still stored in state.
+    state = setInputKey(state, "left", true);
+    expect(resolvePaddleDelta(state, paddle, speed, dt)).toBeCloseTo(-speed * dt);
+  });
+
+  it("hands control back to mouse after keyboard (mouse -> keyboard -> mouse)", () => {
+    let state = createInputState();
+
+    state = setInputPointer(state, paddle.x + paddle.w / 2 + 20);
+    expect(resolvePaddleDelta(state, paddle, speed, dt)).toBeCloseTo(20);
+
+    state = setInputKey(state, "left", true);
+    expect(resolvePaddleDelta(state, paddle, speed, dt)).toBeCloseTo(-speed * dt);
+    state = setInputKey(state, "left", false);
+
+    state = setInputPointer(state, paddle.x + paddle.w / 2 - 30);
+    expect(resolvePaddleDelta(state, paddle, speed, dt)).toBeCloseTo(-30);
+  });
+
+  it("supports repeated switching: keyboard -> mouse -> keyboard -> mouse", () => {
+    let state = createInputState();
+
+    state = setInputKey(state, "right", true);
+    expect(resolvePaddleDelta(state, paddle, speed, dt)).toBeGreaterThan(0);
+
+    state = setInputPointer(state, paddle.x + paddle.w / 2 + 10);
+    expect(resolvePaddleDelta(state, paddle, speed, dt)).toBeCloseTo(10);
+
+    state = setInputKey(state, "right", false);
+    state = setInputKey(state, "left", true);
+    expect(resolvePaddleDelta(state, paddle, speed, dt)).toBeLessThan(0);
+
+    state = setInputPointer(state, paddle.x + paddle.w / 2 - 10);
+    expect(resolvePaddleDelta(state, paddle, speed, dt)).toBeCloseTo(-10);
+  });
+
+  it("releasing a key does not hand control back to a stale pointer position", () => {
+    let state = createInputState();
+    state = setInputPointer(state, paddle.x + paddle.w / 2 + 40);
+    state = setInputKey(state, "right", true);
+    state = setInputKey(state, "right", false);
+    // No move key is held and keyboard is still the active source, so there
+    // should be no movement — not a snap back to the old pointer position.
+    expect(resolvePaddleDelta(state, paddle, speed, dt)).toBe(0);
   });
 });

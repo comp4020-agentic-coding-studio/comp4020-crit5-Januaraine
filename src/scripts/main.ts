@@ -3,10 +3,15 @@ import {
   BALL_WIDTH,
   createInitialBall,
   createInitialPaddle,
+  createInputState,
   movePaddle,
+  resolvePaddleDelta,
+  setInputKey,
+  setInputPointer,
   stepGame,
   togglePause,
   type Ball,
+  type InputState,
   type Paddle,
 } from "./dvd-game";
 
@@ -73,9 +78,7 @@ function initGame(
   let paused = false;
   let flashUntil = 0;
   let lastTime = performance.now();
-  let pointerX: number | null = null;
-
-  const keys = { left: false, right: false };
+  let input: InputState = createInputState();
 
   function pointerToCanvasX(clientX: number): number {
     const rect = canvas.getBoundingClientRect();
@@ -86,7 +89,7 @@ function initGame(
     ball = createInitialBall(bounds, wordmark);
     paddle = createInitialPaddle(bounds);
     colorIndex = 0;
-    pointerX = null;
+    input = createInputState();
     flashUntil = 0;
     running = true;
     paused = false;
@@ -121,15 +124,8 @@ function initGame(
     lastTime = time;
 
     if (!paused) {
-      let dx = 0;
-      if (keys.left) dx -= PADDLE_SPEED * dt;
-      if (keys.right) dx += PADDLE_SPEED * dt;
+      const dx = resolvePaddleDelta(input, paddle, PADDLE_SPEED, dt);
       if (dx !== 0) paddle = movePaddle(paddle, dx, bounds);
-
-      if (pointerX !== null) {
-        const targetX = pointerX - paddle.w / 2;
-        paddle = movePaddle(paddle, targetX - paddle.x, bounds);
-      }
     }
 
     const result = stepGame(ball, paddle, bounds, dt, paused);
@@ -162,8 +158,8 @@ function initGame(
 
   window.addEventListener("keydown", (event) => {
     if (MOVE_KEYS.has(event.code)) event.preventDefault();
-    if (event.code === "KeyA" || event.code === "ArrowLeft") keys.left = true;
-    if (event.code === "KeyD" || event.code === "ArrowRight") keys.right = true;
+    if (event.code === "KeyA" || event.code === "ArrowLeft") input = setInputKey(input, "left", true);
+    if (event.code === "KeyD" || event.code === "ArrowRight") input = setInputKey(input, "right", true);
     if (event.code === "Escape" || event.code === "KeyP") {
       paused = togglePause(paused, running);
       pauseOverlay.hidden = !paused;
@@ -172,12 +168,12 @@ function initGame(
   });
 
   window.addEventListener("keyup", (event) => {
-    if (event.code === "KeyA" || event.code === "ArrowLeft") keys.left = false;
-    if (event.code === "KeyD" || event.code === "ArrowRight") keys.right = false;
+    if (event.code === "KeyA" || event.code === "ArrowLeft") input = setInputKey(input, "left", false);
+    if (event.code === "KeyD" || event.code === "ArrowRight") input = setInputKey(input, "right", false);
   });
 
   canvas.addEventListener("mousemove", (event) => {
-    pointerX = pointerToCanvasX(event.clientX);
+    input = setInputPointer(input, pointerToCanvasX(event.clientX));
   });
 
   canvas.addEventListener(
@@ -185,7 +181,7 @@ function initGame(
     (event) => {
       event.preventDefault();
       const touch = event.touches[0];
-      if (touch) pointerX = pointerToCanvasX(touch.clientX);
+      if (touch) input = setInputPointer(input, pointerToCanvasX(touch.clientX));
     },
     { passive: false },
   );
@@ -195,7 +191,7 @@ function initGame(
     (event) => {
       event.preventDefault();
       const touch = event.touches[0];
-      if (touch) pointerX = pointerToCanvasX(touch.clientX);
+      if (touch) input = setInputPointer(input, pointerToCanvasX(touch.clientX));
     },
     { passive: false },
   );

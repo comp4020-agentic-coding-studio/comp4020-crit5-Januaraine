@@ -176,3 +176,68 @@ export function stepGame(
 export function togglePause(paused: boolean, running: boolean): boolean {
   return running ? !paused : paused;
 }
+
+/**
+ * Keyboard and mouse/touch are independent input methods, not mutually
+ * exclusive modes: either can move the paddle at any time, and whichever one
+ * the player actually used most recently ("source") is the one whose intent
+ * is applied on the next step. This is what lets keyboard immediately regain
+ * control after mouse use, without the two fighting over the paddle every
+ * frame or requiring the game to be re-focused.
+ */
+export type InputSource = "keyboard" | "pointer";
+
+export interface InputState {
+  keyLeft: boolean;
+  keyRight: boolean;
+  pointerX: number | null;
+  source: InputSource | null;
+}
+
+export function createInputState(): InputState {
+  return { keyLeft: false, keyRight: false, pointerX: null, source: null };
+}
+
+/**
+ * Records a keyboard move key's pressed/released state. Pressing a move key
+ * (not releasing one) hands input authority to the keyboard, so a stale
+ * pointer position from earlier mouse use can no longer override it.
+ */
+export function setInputKey(
+  state: InputState,
+  direction: "left" | "right",
+  pressed: boolean,
+): InputState {
+  const next: InputState =
+    direction === "left" ? { ...state, keyLeft: pressed } : { ...state, keyRight: pressed };
+  return pressed ? { ...next, source: "keyboard" } : next;
+}
+
+/** Records a mouse/touch pointer position and hands input authority to it. */
+export function setInputPointer(state: InputState, x: number): InputState {
+  return { ...state, pointerX: x, source: "pointer" };
+}
+
+/**
+ * Resolves how far to move the paddle this step from whichever input source
+ * is currently authoritative — keyboard velocity for "keyboard", or the
+ * offset to the last known pointer position for "pointer". Returns 0 before
+ * any input has ever been received.
+ */
+export function resolvePaddleDelta(
+  state: InputState,
+  paddle: Paddle,
+  speed: number,
+  dt: number,
+): number {
+  if (state.source === "keyboard") {
+    let dx = 0;
+    if (state.keyLeft) dx -= speed * dt;
+    if (state.keyRight) dx += speed * dt;
+    return dx;
+  }
+  if (state.source === "pointer" && state.pointerX !== null) {
+    return state.pointerX - paddle.w / 2 - paddle.x;
+  }
+  return 0;
+}
