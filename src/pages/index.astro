@@ -23,18 +23,16 @@ import "../styles/styles.css";
 
   </head>
   <body>
-    <header>
+    <header class="visually-hidden">
       <nav aria-label="Primary">
         <a href="./">Home</a>
       </nav>
     </header>
     <main>
-      <h1>DVD Logo Breakout</h1>
+      <h1 class="visually-hidden">DVD Logo Breakout</h1>
       <div class="game-wrapper">
         <canvas
           id="game"
-          width="720"
-          height="480"
           aria-label="DVD logo breakout game. Move the paddle with A/D, arrow keys, your mouse, or by dragging on the screen. Keep the bouncing DVD logo from falling past the paddle. Reach a top corner to win."
         ></canvas>
         <div id="mode-select" class="game-over mode-select">

@@ -13,6 +13,7 @@ import {
   DEFAULT_DIFFICULTY,
   INITIAL_SPEED_BOOST_STATE,
   movePaddle,
+  PADDLE_MARGIN_BOTTOM,
   pushTrailEntry,
   recordCatch,
   recordWin,
@@ -95,6 +96,12 @@ function initGame(
 ): void {
   ctx.imageSmoothingEnabled = false;
 
+  // The canvas's drawing buffer is sized to the actual viewport (not a fixed
+  // resolution stretched via CSS) so physics/collision bounds and the
+  // rendered pixels always agree — see syncViewportSize below, which keeps
+  // this true across resizes too.
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
   const bounds = { w: canvas.width, h: canvas.height };
   const PADDLE_SPEED = 390; // px/s
   const COLORS = ["#39ff88", "#ff4d6d", "#ffd93d", "#4dd2ff", "#c77dff"];
@@ -163,6 +170,49 @@ function initGame(
   function scheduleLoop(): void {
     if (rafHandle !== null) cancelAnimationFrame(rafHandle);
     rafHandle = requestAnimationFrame(loop);
+  }
+
+  /**
+   * Keeps the canvas's drawing buffer, and every collision bound derived
+   * from `bounds`, in lockstep with the current browser viewport. `bounds`
+   * is mutated in place (never reassigned) so every closure that already
+   * captured it — draw, pointerToCanvasX, the game loop — reads the new
+   * size on its very next use, with no need to re-wire anything.
+   *
+   * On shrink, the logo(s) are clamped back inside the new bounds without
+   * touching velocity, and the paddle is re-anchored to PADDLE_MARGIN_BOTTOM
+   * above the new bottom edge (the same fixed offset createInitialPaddle
+   * uses) rather than clamped from its stale y — clamping alone only looks
+   * right on shrink; growing back leaves the old y still inside the larger
+   * bounds, so it'd never return to the bottom. None of this
+   * restarts/resets any game state, so a run in progress (score, best,
+   * difficulty, pause state) survives the resize untouched.
+   */
+  function syncViewportSize(): void {
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    if (w === bounds.w && h === bounds.h) return;
+
+    canvas.width = w;
+    canvas.height = h;
+    // Resizing the canvas's width/height resets the whole 2D context state
+    // (including imageSmoothingEnabled) to its default, so it must be
+    // reapplied every time or the pixel-art rendering would soften after
+    // the very first resize.
+    ctx.imageSmoothingEnabled = false;
+    bounds.w = w;
+    bounds.h = h;
+
+    paddle = movePaddle(paddle, 0, bounds);
+    paddle = { ...paddle, y: bounds.h - PADDLE_MARGIN_BOTTOM - paddle.h };
+
+    balls = balls.map((logo) => ({
+      ...logo,
+      x: Math.min(Math.max(logo.x, 0), Math.max(bounds.w - logo.w, 0)),
+      y: Math.min(Math.max(logo.y, 0), Math.max(bounds.h - logo.h, 0)),
+    }));
+
+    if (!running) draw(performance.now());
   }
 
   function togglePauseState(): void {
@@ -445,6 +495,8 @@ function initGame(
     if (modeChosen && event.code === "KeyR") reset();
     if (!running && modeChosen && (event.code === "Space" || event.code === "Enter")) reset();
   });
+
+  window.addEventListener("resize", syncViewportSize);
 
   window.addEventListener("keyup", (event) => {
     if (event.code === "KeyA" || event.code === "ArrowLeft") input = setInputKey(input, "left", false);
