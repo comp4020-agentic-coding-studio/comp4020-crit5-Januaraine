@@ -1,16 +1,108 @@
+:root {
+  --bg: #0d0d1a;
+  --panel: #1a1a2e;
+  --fg: #f4f4f4;
+  --muted: #c9c9d8;
+  --accent: #39ff88;
+  --danger: #ff4d6d;
+}
+
+* {
+  box-sizing: border-box;
+}
+
 body {
   margin: 0;
-  padding: 2rem;
-  font-family: system-ui, sans-serif;
+  padding: 2rem 1rem;
+  font-family: "Courier New", ui-monospace, monospace;
   line-height: 1.6;
-  color: #1a1a1a;
+  color: var(--fg);
+  background: var(--bg);
 }
 
 main {
   max-width: 40rem;
   margin: 0 auto;
+  text-align: center;
 }
 
 a {
-  color: #0b5fff;
+  color: var(--accent);
+}
+
+h1 {
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-size: 1.5rem;
+}
+
+.instructions {
+  font-size: 0.95rem;
+  color: var(--muted);
+}
+
+kbd {
+  background: var(--panel);
+  border: 1px solid #3a3a52;
+  border-radius: 2px;
+  padding: 0 0.35em;
+  font-family: inherit;
+}
+
+.game-wrapper {
+  position: relative;
+  width: 100%;
+  max-width: 30rem;
+  aspect-ratio: 3 / 2;
+  margin: 1.5rem auto 0;
+  border: 4px solid var(--panel);
+  box-shadow:
+    0 0 0 4px var(--bg),
+    0 0 0 8px var(--panel);
+  background: #000;
+}
+
+#game {
+  display: block;
+  width: 100%;
+  height: 100%;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  touch-action: none;
+}
+
+.game-over {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  background: rgb(13 13 26 / 85%);
+  font-size: 1.5rem;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  color: var(--danger);
+}
+
+.game-over[hidden] {
+  display: none;
+}
+
+.game-over button {
+  font-family: inherit;
+  font-size: 1rem;
+  color: var(--bg);
+  background: var(--accent);
+  border: none;
+  padding: 0.5em 1.25em;
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+.game-over button:hover,
+.game-over button:focus-visible {
+  filter: brightness(1.1);
 }
