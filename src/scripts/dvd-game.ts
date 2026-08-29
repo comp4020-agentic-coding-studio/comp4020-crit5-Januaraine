@@ -27,6 +27,8 @@ export interface StepResult {
   wallHit: boolean;
   /** The logo touched the top wall and a side wall in the same step. */
   cornerHit: boolean;
+  /** The logo hit a corner exactly — the game's win condition. */
+  win: boolean;
   /** The paddle caught the logo. */
   bounced: boolean;
   /** The logo's bottom edge cleared the paddle's bottom edge, uncaught. */
@@ -109,6 +111,7 @@ export function stepBall(ball: Ball, paddle: Paddle, bounds: Bounds, dt: number)
     hitTopWall = true;
   }
 
+  const cornerHit = hitXWall && hitTopWall;
   let bounced = false;
   let gameOver = false;
 
@@ -134,7 +137,8 @@ export function stepBall(ball: Ball, paddle: Paddle, bounds: Bounds, dt: number)
   return {
     ball: { ...ball, x, y, vx, vy },
     wallHit: hitXWall || hitTopWall,
-    cornerHit: hitXWall && hitTopWall,
+    cornerHit,
+    win: cornerHit,
     bounced,
     gameOver,
   };

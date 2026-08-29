@@ -56,6 +56,31 @@ describe("stepBall: walls", () => {
     const sideOnly = stepBall(makeBall({ x: 1, y: 100, vx: -100, vy: 0 }), paddle, bounds, 0.1);
     expect(sideOnly.cornerHit).toBe(false);
   });
+
+  it("wins on a top-left corner hit, and again on a top-right corner hit", () => {
+    const paddle = createInitialPaddle(bounds);
+
+    const topLeft = stepBall(makeBall({ x: 1, y: 1, vx: -100, vy: -100 }), paddle, bounds, 0.1);
+    expect(topLeft.win).toBe(true);
+
+    const topRight = stepBall(
+      makeBall({ x: bounds.w - BALL_WIDTH - 1, y: 1, vx: 100, vy: -100 }),
+      paddle,
+      bounds,
+      0.1,
+    );
+    expect(topRight.win).toBe(true);
+  });
+
+  it("does not win on a side-only or top-only wall hit", () => {
+    const paddle = createInitialPaddle(bounds);
+
+    const sideOnly = stepBall(makeBall({ x: 1, y: 100, vx: -100, vy: 0 }), paddle, bounds, 0.1);
+    expect(sideOnly.win).toBe(false);
+
+    const topOnly = stepBall(makeBall({ x: 200, y: 1, vx: 0, vy: -100 }), paddle, bounds, 0.1);
+    expect(topOnly.win).toBe(false);
+  });
 });
 
 describe("stepBall: paddle band", () => {

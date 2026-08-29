@@ -10,7 +10,7 @@ import {
 } from "./dvd-game";
 
 const WORDMARK_TEXT = "DVD";
-const WORDMARK_FONT_SIZE = Math.round(BALL_HEIGHT * 0.7);
+const WORDMARK_FONT_SIZE = Math.round(BALL_HEIGHT * 1.1);
 
 interface WordmarkBox {
   w: number;
@@ -50,6 +50,8 @@ function initGame(
   ctx: CanvasRenderingContext2D,
   overlay: HTMLDivElement,
   restartButton: HTMLButtonElement,
+  winOverlay: HTMLDivElement,
+  restartWinButton: HTMLButtonElement,
 ): void {
   ctx.imageSmoothingEnabled = false;
 
@@ -85,6 +87,7 @@ function initGame(
     flashUntil = 0;
     running = true;
     overlay.hidden = true;
+    winOverlay.hidden = true;
     lastTime = performance.now();
     requestAnimationFrame(loop);
   }
@@ -141,6 +144,12 @@ function initGame(
       return;
     }
 
+    if (result.win) {
+      running = false;
+      winOverlay.hidden = false;
+      return;
+    }
+
     requestAnimationFrame(loop);
   }
 
@@ -181,6 +190,7 @@ function initGame(
   );
 
   restartButton.addEventListener("click", reset);
+  restartWinButton.addEventListener("click", reset);
 
   draw();
   requestAnimationFrame(loop);
@@ -189,8 +199,10 @@ function initGame(
 const canvas = document.querySelector<HTMLCanvasElement>("#game");
 const overlay = document.querySelector<HTMLDivElement>("#game-over");
 const restartButton = document.querySelector<HTMLButtonElement>("#restart");
+const winOverlay = document.querySelector<HTMLDivElement>("#game-win");
+const restartWinButton = document.querySelector<HTMLButtonElement>("#restart-win");
 
-if (canvas && overlay && restartButton) {
+if (canvas && overlay && restartButton && winOverlay && restartWinButton) {
   const ctx = canvas.getContext("2d");
-  if (ctx) initGame(canvas, ctx, overlay, restartButton);
+  if (ctx) initGame(canvas, ctx, overlay, restartButton, winOverlay, restartWinButton);
 }

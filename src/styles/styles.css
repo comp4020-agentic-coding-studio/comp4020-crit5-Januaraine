@@ -77,6 +77,10 @@ h1 {
   display: none;
 }
 
+.game-win {
+  color: var(--accent);
+}
+
 .game-over button {
   font-family: inherit;
   font-size: 1rem;
