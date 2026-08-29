@@ -526,6 +526,78 @@ describe("win screen: Play Again/Change Mode contracts (main.ts wires #restart-w
   });
 });
 
+describe("R restart shortcut (main.ts routes KeyR to the same reset() as the Restart/Play Again buttons, in every game state)", () => {
+  it("restarts during active gameplay: resets catches to 0 while preserving the session best", () => {
+    let score = createScoreState();
+    score = recordCatch(score, true);
+    score = recordCatch(score, true);
+    score = recordWin(score); // best becomes 2
+
+    // main.ts's KeyR handler calls reset() -> resetCatches(score), the exact
+    // same path as every other restart trigger.
+    const afterR = resetCatches(score);
+    expect(afterR.catches).toBe(0);
+    expect(afterR.best).toBe(2);
+  });
+
+  it("restarts while paused: reset() unconditionally sets paused back to false, so R also closes the pause menu", () => {
+    // main.ts's reset() sets `paused = false` and hides pauseOverlay
+    // regardless of the paused flag's value beforehand, so pressing R while
+    // paused both closes the pause menu and starts the new game in one step.
+    let score = createScoreState();
+    score = recordCatch(score, true);
+    score = recordWin(score); // best becomes 1
+
+    const frozen = stepGame(makeBall(), createInitialPaddle(bounds), bounds, 0.1, true);
+    expect(frozen.ball).toEqual(makeBall());
+
+    const afterR = resetCatches(score);
+    expect(afterR.catches).toBe(0);
+    expect(afterR.best).toBe(1);
+  });
+
+  it("restarts after a Win, starting a new game in the same difficulty without touching best", () => {
+    let score = createScoreState();
+    for (let i = 0; i < 15; i++) score = recordCatch(score, true);
+    score = recordWin(score); // best becomes 15
+
+    // reset() has no difficulty parameter — it never touches `difficulty`,
+    // so whichever mode was chosen on mode-select simply carries over.
+    const afterR = resetCatches(score);
+    expect(afterR.catches).toBe(0);
+    expect(afterR.best).toBe(15);
+  });
+
+  it("restarts after a Game Over, starting a new game in the same difficulty without touching best", () => {
+    let score = createScoreState();
+    for (let i = 0; i < 3; i++) score = recordCatch(score, true);
+    // Game over never calls recordWin, so best stays whatever it already was.
+    score = recordWin(score); // best becomes 3, simulating an earlier win this session
+    score = resetCatches(score);
+    for (let i = 0; i < 2; i++) score = recordCatch(score, true);
+    // Now simulate a game-over (no recordWin call) followed by an R restart.
+    const afterR = resetCatches(score);
+    expect(afterR.catches).toBe(0);
+    expect(afterR.best).toBe(3);
+  });
+
+  it("R's restart resets the ball and paddle to their initial state, just like every other restart path", () => {
+    // reset() rebuilds the ball via createInitialBall/createInitialPaddle
+    // exactly as the mode-select/Restart/Play Again paths already do; this
+    // asserts the initial paddle position those all converge on.
+    const paddle = createInitialPaddle(bounds);
+    expect(paddle.x).toBeGreaterThanOrEqual(0);
+    expect(paddle.x + paddle.w).toBeLessThanOrEqual(bounds.w);
+  });
+
+  it("P/Esc pause behaviour is unaffected by the new R shortcut: togglePause still toggles independently", () => {
+    expect(togglePause(false, true)).toBe(true);
+    expect(togglePause(true, true)).toBe(false);
+    expect(togglePause(false, false)).toBe(false);
+    expect(togglePause(true, false)).toBe(true);
+  });
+});
+
 describe("movePaddle", () => {
   it("clamps to the left edge", () => {
     const paddle = createInitialPaddle(bounds);

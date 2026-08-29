@@ -439,6 +439,10 @@ function initGame(
     if (event.code === "KeyA" || event.code === "ArrowLeft") input = setInputKey(input, "left", true);
     if (event.code === "KeyD" || event.code === "ArrowRight") input = setInputKey(input, "right", true);
     if (event.code === "Escape" || event.code === "KeyP") togglePauseState();
+    // R restarts unconditionally once a difficulty is chosen — while
+    // playing, paused, or after a win/game-over — always via the same
+    // reset() as the restart buttons, never opening mode-select.
+    if (modeChosen && event.code === "KeyR") reset();
     if (!running && modeChosen && (event.code === "Space" || event.code === "Enter")) reset();
   });
 
