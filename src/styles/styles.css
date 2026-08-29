@@ -85,6 +85,25 @@ h1 {
   color: var(--fg);
 }
 
+.mode-select {
+  color: var(--fg);
+}
+
+.mode-buttons {
+  display: flex;
+  gap: 1rem;
+}
+
+.pause-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.pause-buttons button {
+  min-width: 10rem;
+}
+
 .score-line {
   margin: 0;
   font-size: 1rem;

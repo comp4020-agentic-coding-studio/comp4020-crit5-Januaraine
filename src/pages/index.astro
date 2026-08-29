@@ -35,8 +35,16 @@ import "../styles/styles.css";
           id="game"
           width="720"
           height="480"
-          aria-label="DVD logo breakout game. Move the paddle with A/D, arrow keys, your mouse, or by dragging on the screen. Keep the bouncing DVD logo from falling past the paddle. Hit a corner exactly to win."
+          aria-label="DVD logo breakout game. Move the paddle with A/D, arrow keys, your mouse, or by dragging on the screen. Keep the bouncing DVD logo from falling past the paddle. Reach a top corner to win."
         ></canvas>
+        <div id="mode-select" class="game-over mode-select">
+          <p>DVD Logo</p>
+          <p class="score-line">Select Mode</p>
+          <div class="mode-buttons">
+            <button id="mode-easy" type="button">Easy</button>
+            <button id="mode-hard" type="button">Hard</button>
+          </div>
+        </div>
         <div id="game-over" class="game-over" hidden>
           <p>Game Over</p>
           <p class="score-line">CATCHES: <span id="game-over-catches">0</span></p>
@@ -47,10 +55,18 @@ import "../styles/styles.css";
           <p>You Win!</p>
           <p class="score-line">CATCHES: <span id="game-win-catches">0</span></p>
           <p class="score-line">BEST: <span id="game-win-best">—</span></p>
-          <button id="restart-win" type="button">Play Again</button>
+          <div class="pause-buttons">
+            <button id="restart-win" type="button">Play Again</button>
+            <button id="win-change-mode" type="button">Change Mode</button>
+          </div>
         </div>
         <div id="game-paused" class="game-over game-paused" hidden>
           <p>Paused</p>
+          <div class="pause-buttons">
+            <button id="pause-continue" type="button">Continue</button>
+            <button id="pause-restart" type="button">Restart</button>
+            <button id="pause-change-mode" type="button">Change Mode</button>
+          </div>
         </div>
       </div>
     </main>

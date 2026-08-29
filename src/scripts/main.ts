@@ -10,6 +10,7 @@ import {
   createSmallBalls,
   createScoreState,
   deactivateSpeedBoost,
+  DEFAULT_DIFFICULTY,
   INITIAL_SPEED_BOOST_STATE,
   movePaddle,
   pushTrailEntry,
@@ -28,6 +29,7 @@ import {
   TRAIL_LENGTH,
   wallHitTriggersSpawn,
   type Ball,
+  type Difficulty,
   type InputState,
   type Paddle,
   type ScoreState,
@@ -83,6 +85,13 @@ function initGame(
   gameOverBestEl: HTMLElement,
   winCatchesEl: HTMLElement,
   winBestEl: HTMLElement,
+  modeSelectOverlay: HTMLDivElement,
+  easyModeButton: HTMLButtonElement,
+  hardModeButton: HTMLButtonElement,
+  pauseContinueButton: HTMLButtonElement,
+  pauseRestartButton: HTMLButtonElement,
+  pauseChangeModeButton: HTMLButtonElement,
+  winChangeModeButton: HTMLButtonElement,
 ): void {
   ctx.imageSmoothingEnabled = false;
 
@@ -126,15 +135,39 @@ function initGame(
   // so the map never grows past however many logos are actually on screen.
   let trails: Map<number, TrailEntry[]> = new Map();
   let lastTrailSampleAt = -Infinity;
-  let running = true;
+  let running = false;
   let paused = false;
   let flashUntil = 0;
   let lastTime = performance.now();
   let input: InputState = createInputState();
+  // Chosen once on the mode-select screen and carried through every
+  // restart of the current session — only the mode-select screen (not the
+  // in-game restart buttons) changes it. Defaults to DEFAULT_DIFFICULTY
+  // purely as a placeholder before the player has chosen; it can't affect
+  // gameplay because the loop never runs until modeChosen is true.
+  let difficulty: Difficulty = DEFAULT_DIFFICULTY;
+  let modeChosen = false;
+  // Tracks the single in-flight requestAnimationFrame callback. The loop
+  // keeps re-scheduling itself every frame even while paused (so `lastTime`
+  // stays fresh and resuming doesn't see a huge dt) — so anything that
+  // restarts the loop out-of-band (reset, goToModeSelect) must cancel
+  // whichever frame is already pending first, or two loops would run
+  // concurrently and double-step the game.
+  let rafHandle: number | null = null;
 
   function pointerToCanvasX(clientX: number): number {
     const rect = canvas.getBoundingClientRect();
     return (clientX - rect.left) * (bounds.w / rect.width);
+  }
+
+  function scheduleLoop(): void {
+    if (rafHandle !== null) cancelAnimationFrame(rafHandle);
+    rafHandle = requestAnimationFrame(loop);
+  }
+
+  function togglePauseState(): void {
+    paused = togglePause(paused, running);
+    pauseOverlay.hidden = !paused;
   }
 
   function reset(): void {
@@ -156,7 +189,38 @@ function initGame(
     winOverlay.hidden = true;
     pauseOverlay.hidden = true;
     lastTime = performance.now();
-    requestAnimationFrame(loop);
+    scheduleLoop();
+  }
+
+  /** Locks in the chosen difficulty for this play session and starts the first game. Only the mode-select screen calls this — restarts reuse the same difficulty via reset(). */
+  function startGame(mode: Difficulty): void {
+    difficulty = mode;
+    modeChosen = true;
+    modeSelectOverlay.hidden = true;
+    reset();
+  }
+
+  /**
+   * "Change Mode": exits the current game entirely (from the pause menu or
+   * the win screen) and reopens mode-select, without touching the session's
+   * best score. Clears modeChosen (not just running) so the Space/Enter
+   * restart shortcut can't fire while the mode-select screen is back up —
+   * the same guard that protects it before the very first mode is ever
+   * chosen. Hides every overlay it could have been called from so none of
+   * them linger behind mode-select.
+   */
+  function goToModeSelect(): void {
+    running = false;
+    paused = false;
+    modeChosen = false;
+    if (rafHandle !== null) {
+      cancelAnimationFrame(rafHandle);
+      rafHandle = null;
+    }
+    overlay.hidden = true;
+    winOverlay.hidden = true;
+    pauseOverlay.hidden = true;
+    modeSelectOverlay.hidden = false;
   }
 
   /**
@@ -202,7 +266,7 @@ function initGame(
     }
   }
 
-  /** "SPEED UP n.n" countdown, purely reflecting speedBoostRemainingMs — hidden once the boost isn't active. */
+  /** "SPEED UP n.n" countdown, purely reflecting speedBoostRemainingMs — hidden once the boost isn't active. Sits below the difficulty label so the two never overlap. */
   function drawSpeedBoostHud(remainingMs: number): void {
     if (remainingMs <= 0) return;
     ctx.save();
@@ -210,7 +274,23 @@ function initGame(
     ctx.textAlign = "right";
     ctx.textBaseline = "top";
     ctx.fillStyle = BOOST_HUD_COLOR;
-    ctx.fillText(`SPEED UP ${(remainingMs / 1000).toFixed(1)}`, bounds.w - 10, 10);
+    ctx.fillText(`SPEED UP ${(remainingMs / 1000).toFixed(1)}`, bounds.w - 10, 30);
+    ctx.restore();
+  }
+
+  /**
+   * Unobtrusive "EASY" / "HARD" readout, top-right — the only in-game
+   * indication of which corner-win rule is active. No rules text, just the
+   * mode name, and it stays drawn on the canvas (so it's still visible,
+   * dimmed, once a win/game-over overlay covers the canvas).
+   */
+  function drawDifficultyHud(mode: Difficulty): void {
+    ctx.save();
+    ctx.font = `bold 16px "Courier New", ui-monospace, monospace`;
+    ctx.textAlign = "right";
+    ctx.textBaseline = "top";
+    ctx.fillStyle = "#e6e6f0";
+    ctx.fillText(mode.toUpperCase(), bounds.w - 10, 10);
     ctx.restore();
   }
 
@@ -238,11 +318,15 @@ function initGame(
     ctx.fillRect(paddle.x, paddle.y, paddle.w, paddle.h);
 
     drawScoreHud(score);
+    if (modeChosen) drawDifficultyHud(difficulty);
     drawSpeedBoostHud(speedBoostRemainingMs(speedBoost, gameTime));
   }
 
   function loop(time: number): void {
-    if (!running) return;
+    if (!running) {
+      rafHandle = null;
+      return;
+    }
     const dt = Math.min((time - lastTime) / 1000, 0.05);
     lastTime = time;
 
@@ -253,7 +337,7 @@ function initGame(
       if (dx !== 0) paddle = movePaddle(paddle, dx, bounds);
     }
 
-    const result = stepEntities(balls, paddle, bounds, dt, paused);
+    const result = stepEntities(balls, paddle, bounds, dt, paused, difficulty);
     balls = result.balls;
     const main = result.main;
 
@@ -347,18 +431,15 @@ function initGame(
       return;
     }
 
-    requestAnimationFrame(loop);
+    rafHandle = requestAnimationFrame(loop);
   }
 
   window.addEventListener("keydown", (event) => {
     if (MOVE_KEYS.has(event.code)) event.preventDefault();
     if (event.code === "KeyA" || event.code === "ArrowLeft") input = setInputKey(input, "left", true);
     if (event.code === "KeyD" || event.code === "ArrowRight") input = setInputKey(input, "right", true);
-    if (event.code === "Escape" || event.code === "KeyP") {
-      paused = togglePause(paused, running);
-      pauseOverlay.hidden = !paused;
-    }
-    if (!running && (event.code === "Space" || event.code === "Enter")) reset();
+    if (event.code === "Escape" || event.code === "KeyP") togglePauseState();
+    if (!running && modeChosen && (event.code === "Space" || event.code === "Enter")) reset();
   });
 
   window.addEventListener("keyup", (event) => {
@@ -392,9 +473,16 @@ function initGame(
 
   restartButton.addEventListener("click", reset);
   restartWinButton.addEventListener("click", reset);
+  easyModeButton.addEventListener("click", () => startGame("easy"));
+  hardModeButton.addEventListener("click", () => startGame("hard"));
+  pauseContinueButton.addEventListener("click", togglePauseState);
+  pauseRestartButton.addEventListener("click", reset);
+  pauseChangeModeButton.addEventListener("click", goToModeSelect);
+  winChangeModeButton.addEventListener("click", goToModeSelect);
 
+  // Static initial frame behind the mode-select overlay; the loop itself
+  // only starts once a mode is chosen (see startGame -> reset).
   draw(performance.now());
-  requestAnimationFrame(loop);
 }
 
 const canvas = document.querySelector<HTMLCanvasElement>("#game");
@@ -407,6 +495,13 @@ const gameOverCatchesEl = document.querySelector<HTMLElement>("#game-over-catche
 const gameOverBestEl = document.querySelector<HTMLElement>("#game-over-best");
 const winCatchesEl = document.querySelector<HTMLElement>("#game-win-catches");
 const winBestEl = document.querySelector<HTMLElement>("#game-win-best");
+const modeSelectOverlay = document.querySelector<HTMLDivElement>("#mode-select");
+const easyModeButton = document.querySelector<HTMLButtonElement>("#mode-easy");
+const hardModeButton = document.querySelector<HTMLButtonElement>("#mode-hard");
+const pauseContinueButton = document.querySelector<HTMLButtonElement>("#pause-continue");
+const pauseRestartButton = document.querySelector<HTMLButtonElement>("#pause-restart");
+const pauseChangeModeButton = document.querySelector<HTMLButtonElement>("#pause-change-mode");
+const winChangeModeButton = document.querySelector<HTMLButtonElement>("#win-change-mode");
 
 if (
   canvas &&
@@ -418,7 +513,14 @@ if (
   gameOverCatchesEl &&
   gameOverBestEl &&
   winCatchesEl &&
-  winBestEl
+  winBestEl &&
+  modeSelectOverlay &&
+  easyModeButton &&
+  hardModeButton &&
+  pauseContinueButton &&
+  pauseRestartButton &&
+  pauseChangeModeButton &&
+  winChangeModeButton
 ) {
   const ctx = canvas.getContext("2d");
   if (ctx)
@@ -434,5 +536,12 @@ if (
       gameOverBestEl,
       winCatchesEl,
       winBestEl,
+      modeSelectOverlay,
+      easyModeButton,
+      hardModeButton,
+      pauseContinueButton,
+      pauseRestartButton,
+      pauseChangeModeButton,
+      winChangeModeButton,
     );
 }

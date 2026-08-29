@@ -6,6 +6,7 @@ import {
   BALL_WIDTH,
   CATCH_SKILL_THRESHOLD,
   catchTriggersSpeedBoost,
+  cornerWinTolerance,
   createInitialPaddle,
   createInputState,
   createScoreState,
@@ -114,6 +115,155 @@ describe("stepBall: walls", () => {
 
     const topOnly = stepBall(makeBall({ x: 200, y: 1, vx: 0, vy: -100 }), paddle, bounds, 0.1);
     expect(topOnly.win).toBe(false);
+  });
+
+  it("wins when the logo is merely inside the corner win-zone tolerance, without touching either wall", () => {
+    const paddle = createInitialPaddle(bounds);
+    const tolerance = cornerWinTolerance(bounds);
+
+    // Sitting just inside the top-left win zone, not touching x=0 or y=0.
+    const nearTopLeft = stepBall(
+      makeBall({ x: tolerance - 5, y: tolerance - 10, vx: 0, vy: 0 }),
+      paddle,
+      bounds,
+      0.1,
+    );
+    expect(nearTopLeft.cornerHit).toBe(false);
+    expect(nearTopLeft.wallHit).toBe(false);
+    expect(nearTopLeft.win).toBe(true);
+
+    // Sitting just inside the top-right win zone, not touching either wall.
+    const nearTopRight = stepBall(
+      makeBall({ x: bounds.w - BALL_WIDTH - (tolerance - 5), y: tolerance - 10, vx: 0, vy: 0 }),
+      paddle,
+      bounds,
+      0.1,
+    );
+    expect(nearTopRight.cornerHit).toBe(false);
+    expect(nearTopRight.wallHit).toBe(false);
+    expect(nearTopRight.win).toBe(true);
+  });
+
+  it("does not win when the logo is clearly outside the corner win-zone tolerance", () => {
+    const paddle = createInitialPaddle(bounds);
+    const tolerance = cornerWinTolerance(bounds);
+
+    // Well past the tolerance on both axes — nowhere near either top corner.
+    const farFromCorner = stepBall(
+      makeBall({ x: tolerance + 40, y: tolerance + 40, vx: 0, vy: 0 }),
+      paddle,
+      bounds,
+      0.1,
+    );
+    expect(farFromCorner.win).toBe(false);
+
+    // Close to the left wall but well below the top-edge tolerance band.
+    const closeToLeftWallOnly = stepBall(
+      makeBall({ x: 0, y: tolerance + 40, vx: 0, vy: 0 }),
+      paddle,
+      bounds,
+      0.1,
+    );
+    expect(closeToLeftWallOnly.win).toBe(false);
+  });
+});
+
+describe("stepBall: difficulty-specific corner win condition", () => {
+  it("EASY: wins on an exact corner hit", () => {
+    const paddle = createInitialPaddle(bounds);
+    const result = stepBall(makeBall({ x: 1, y: 1, vx: -100, vy: -100 }), paddle, bounds, 0.1, "easy");
+    expect(result.win).toBe(true);
+  });
+
+  it("EASY: wins when merely inside the corner tolerance, without touching either wall", () => {
+    const paddle = createInitialPaddle(bounds);
+    const tolerance = cornerWinTolerance(bounds);
+    const result = stepBall(
+      makeBall({ x: tolerance - 5, y: tolerance - 10, vx: 0, vy: 0 }),
+      paddle,
+      bounds,
+      0.1,
+      "easy",
+    );
+    expect(result.cornerHit).toBe(false);
+    expect(result.win).toBe(true);
+  });
+
+  it("HARD: wins on an exact corner hit", () => {
+    const paddle = createInitialPaddle(bounds);
+    const result = stepBall(makeBall({ x: 1, y: 1, vx: -100, vy: -100 }), paddle, bounds, 0.1, "hard");
+    expect(result.cornerHit).toBe(true);
+    expect(result.win).toBe(true);
+  });
+
+  it("HARD: does not win when only inside the Easy tolerance, without actually reaching the corner", () => {
+    const paddle = createInitialPaddle(bounds);
+    const tolerance = cornerWinTolerance(bounds);
+    const result = stepBall(
+      makeBall({ x: tolerance - 5, y: tolerance - 10, vx: 0, vy: 0 }),
+      paddle,
+      bounds,
+      0.1,
+      "hard",
+    );
+    expect(result.cornerHit).toBe(false);
+    expect(result.win).toBe(false);
+  });
+
+  it("neither mode wins on a normal wall collision away from a corner", () => {
+    const paddle = createInitialPaddle(bounds);
+
+    const easySide = stepBall(makeBall({ x: 1, y: 100, vx: -100, vy: 0 }), paddle, bounds, 0.1, "easy");
+    expect(easySide.win).toBe(false);
+
+    const hardSide = stepBall(makeBall({ x: 1, y: 100, vx: -100, vy: 0 }), paddle, bounds, 0.1, "hard");
+    expect(hardSide.win).toBe(false);
+
+    const easyTop = stepBall(makeBall({ x: 200, y: 1, vx: 0, vy: -100 }), paddle, bounds, 0.1, "easy");
+    expect(easyTop.win).toBe(false);
+
+    const hardTop = stepBall(makeBall({ x: 200, y: 1, vx: 0, vy: -100 }), paddle, bounds, 0.1, "hard");
+    expect(hardTop.win).toBe(false);
+  });
+
+  it("switching difficulty changes the outcome for the exact same near-corner position", () => {
+    const paddle = createInitialPaddle(bounds);
+    const tolerance = cornerWinTolerance(bounds);
+    const nearCornerBall = makeBall({ x: tolerance - 5, y: tolerance - 10, vx: 0, vy: 0 });
+
+    const easyResult = stepBall(nearCornerBall, paddle, bounds, 0.1, "easy");
+    const hardResult = stepBall(nearCornerBall, paddle, bounds, 0.1, "hard");
+
+    expect(easyResult.win).toBe(true);
+    expect(hardResult.win).toBe(false);
+  });
+
+  it("stepBall defaults to Easy's relaxed tolerance when no difficulty is given", () => {
+    const paddle = createInitialPaddle(bounds);
+    const tolerance = cornerWinTolerance(bounds);
+    const result = stepBall(makeBall({ x: tolerance - 5, y: tolerance - 10, vx: 0, vy: 0 }), paddle, bounds, 0.1);
+    expect(result.win).toBe(true);
+  });
+
+  it("catch counting is identical in both modes: a paddle bounce reports bounced regardless of difficulty", () => {
+    const paddle = createInitialPaddle(bounds);
+    const catchingBall = makeBall({
+      x: paddle.x + paddle.w / 2 - BALL_WIDTH / 2,
+      y: paddle.y - BALL_HEIGHT + 1,
+      vx: 0,
+      vy: 200,
+    });
+
+    const easyCatch = stepBall(catchingBall, paddle, bounds, 0.1, "easy");
+    const hardCatch = stepBall(catchingBall, paddle, bounds, 0.1, "hard");
+
+    expect(easyCatch.bounced).toBe(true);
+    expect(hardCatch.bounced).toBe(true);
+
+    const scoreAfterEasy = recordCatch(createScoreState(), easyCatch.bounced);
+    const scoreAfterHard = recordCatch(createScoreState(), hardCatch.bounced);
+    expect(scoreAfterEasy.catches).toBe(1);
+    expect(scoreAfterHard.catches).toBe(1);
   });
 });
 
@@ -262,6 +412,117 @@ describe("togglePause", () => {
   it("is a no-op once the game has ended, so it can't revive a finished win/game-over state", () => {
     expect(togglePause(false, false)).toBe(false);
     expect(togglePause(true, false)).toBe(true);
+  });
+});
+
+describe("pause menu: Continue/Restart contracts (main.ts wires Escape, KeyP, and the pause-menu buttons to these same pure functions)", () => {
+  it("Escape or P pauses a running, unpaused game", () => {
+    // main.ts routes both Escape and KeyP through this same togglePause call,
+    // so a single pure-function assertion covers pausing via either key.
+    expect(togglePause(false, true)).toBe(true);
+  });
+
+  it("Escape, P, or the Continue button resumes a paused game", () => {
+    // main.ts's Continue button calls the exact same togglePause path as the
+    // Escape/P keydown handler (see togglePauseState in main.ts).
+    expect(togglePause(true, true)).toBe(false);
+  });
+
+  it("Continue preserves exact game state: pausing/resuming never touches the ball, paddle, or score, only the paused flag", () => {
+    const paddle = createInitialPaddle(bounds);
+    const ball = makeBall({ x: 111, y: 222, vx: -37, vy: 58 });
+    let score = createScoreState();
+    score = recordCatch(score, true);
+    score = recordCatch(score, true);
+
+    // Freeze while paused...
+    const frozen = stepGame(ball, paddle, bounds, 0.1, true);
+    expect(frozen.ball).toEqual(ball);
+
+    // ...then "Continue" just flips the boolean — nothing else is derived
+    // from it, so the ball/paddle/score a caller already holds are untouched.
+    const resumed = togglePause(true, true);
+    expect(resumed).toBe(false);
+    expect(ball).toEqual({ x: 111, y: 222, w: BALL_WIDTH, h: BALL_HEIGHT, vx: -37, vy: 58, color: "#39ff88" });
+    expect(paddle).toEqual(createInitialPaddle(bounds));
+    expect(score.catches).toBe(2);
+  });
+
+  it("Restart resets catches to 0 while preserving the session best (Restart and Change Mode both reset via resetCatches, never touching best)", () => {
+    let score = createScoreState();
+    for (let i = 0; i < 7; i++) score = recordCatch(score, true);
+    score = recordWin(score); // best becomes 7
+
+    const restarted = resetCatches(score);
+    expect(restarted.catches).toBe(0);
+    expect(restarted.best).toBe(7);
+  });
+
+  it("Change Mode's fresh game (same resetCatches path as Restart) also leaves the session best untouched", () => {
+    let score = createScoreState();
+    for (let i = 0; i < 4; i++) score = recordCatch(score, true);
+    score = recordWin(score); // best becomes 4
+
+    // main.ts's goToModeSelect -> startGame(newMode) -> reset() calls the
+    // exact same resetCatches as an in-place Restart.
+    const freshGame = resetCatches(score);
+    expect(freshGame.catches).toBe(0);
+    expect(freshGame.best).toBe(4);
+  });
+});
+
+describe("win screen: Play Again/Change Mode contracts (main.ts wires #restart-win to reset() and #win-change-mode to the same goToModeSelect() the pause menu uses)", () => {
+  it("Play Again resets catches to 0 while preserving the session best (reset() calls resetCatches, never touching best)", () => {
+    let score = createScoreState();
+    for (let i = 0; i < 5; i++) score = recordCatch(score, true);
+    score = recordWin(score); // best becomes 5
+
+    const playedAgain = resetCatches(score);
+    expect(playedAgain.catches).toBe(0);
+    expect(playedAgain.best).toBe(5);
+  });
+
+  it("Play Again's fresh game keeps the currently selected difficulty (reset() never touches difficulty; only startGame does)", () => {
+    // main.ts's reset() has no difficulty parameter at all — it only resets
+    // ball/paddle/score/timers, so whichever `difficulty` was locked in by
+    // the mode-select screen simply carries over untouched into the new game.
+    let score = createScoreState();
+    score = recordCatch(score, true);
+    score = recordWin(score);
+    const afterPlayAgain = resetCatches(score);
+    expect(afterPlayAgain.catches).toBe(0);
+  });
+
+  it("Change Mode's fresh game (same resetCatches path as Play Again) also leaves the session best untouched", () => {
+    let score = createScoreState();
+    for (let i = 0; i < 6; i++) score = recordCatch(score, true);
+    score = recordWin(score); // best becomes 6
+
+    // main.ts's #win-change-mode button calls the exact same goToModeSelect
+    // -> startGame(newMode) -> reset() chain as the pause menu's Change Mode,
+    // which resets via resetCatches — never touching best.
+    const freshGame = resetCatches(score);
+    expect(freshGame.catches).toBe(0);
+    expect(freshGame.best).toBe(6);
+  });
+
+  it("switching difficulty from the win screen does not carry over the old game's catches into the new one", () => {
+    let score = createScoreState();
+    for (let i = 0; i < 8; i++) score = recordCatch(score, true);
+    score = recordWin(score); // best becomes 8, catches still 8 until reset
+
+    const newDifficultyGame = resetCatches(score);
+    expect(newDifficultyGame.catches).toBe(0);
+  });
+
+  it("the final catch count a winning game reports is exactly what was accumulated, so the Win screen's CATCHES readout reflects it before any reset runs", () => {
+    // main.ts sets winCatchesEl.textContent = String(score.catches) at the
+    // moment main.win fires, strictly before Play Again/Change Mode ever
+    // call resetCatches — so the displayed count is this exact value.
+    let score = createScoreState();
+    for (let i = 0; i < 10; i++) score = recordCatch(score, true);
+    score = recordWin(score);
+    expect(score.catches).toBe(10);
   });
 });
 

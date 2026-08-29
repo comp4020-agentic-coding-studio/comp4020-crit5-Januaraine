@@ -41,7 +41,7 @@ export interface StepResult {
   wallHit: boolean;
   /** The logo touched the top wall and a side wall in the same step. */
   cornerHit: boolean;
-  /** The logo hit a corner exactly — the game's win condition. */
+  /** The logo's visible bounds are within the corner win-zone tolerance — the game's win condition. */
   win: boolean;
   /** The paddle caught the logo. */
   bounced: boolean;
@@ -88,6 +88,37 @@ function overlapsX(a: Rect, b: Rect): boolean {
   return a.x < b.x + b.w && a.x + a.w > b.x;
 }
 
+// Requiring the logo's clamped x AND y to land exactly on 0 (or the
+// mirrored right edge) in the same step means the win only fires on a
+// near-perfectly diagonal approach — the corner is a single point. This
+// tolerance relaxes that to a small square "win zone" hugging each top
+// corner, sized off the canvas's shorter dimension so it scales with the
+// play area (a fixed pixel value would be oversized on a small canvas or
+// negligible on a large one) while staying far short of the whole top edge
+// or either side wall.
+export const CORNER_WIN_TOLERANCE_RATIO = 0.05;
+
+export function cornerWinTolerance(bounds: Bounds): number {
+  return Math.min(bounds.w, bounds.h) * CORNER_WIN_TOLERANCE_RATIO;
+}
+
+/** True once the logo's visible bounds (x, y, w) sit inside the small win-zone square at either top corner. */
+function isInCornerWinZone(x: number, y: number, w: number, bounds: Bounds): boolean {
+  const tolerance = cornerWinTolerance(bounds);
+  if (y > tolerance) return false;
+  return x <= tolerance || x + w >= bounds.w - tolerance;
+}
+
+/**
+ * Easy uses the relaxed corner win-zone tolerance (see isInCornerWinZone);
+ * Hard requires the logo to actually reach the mathematical corner — both
+ * the top wall and a side wall clamped in the same step (cornerHit). This is
+ * the only gameplay difference between the two modes; every other rule
+ * (paddle physics, speed, catch counter, pause, game over) is identical.
+ */
+export type Difficulty = "easy" | "hard";
+export const DEFAULT_DIFFICULTY: Difficulty = "easy";
+
 export function createInitialBall(bounds: Bounds, size?: { w: number; h: number }): Ball {
   const w = size?.w ?? BALL_WIDTH;
   const h = size?.h ?? BALL_HEIGHT;
@@ -121,8 +152,18 @@ export function movePaddle(paddle: Paddle, dx: number, bounds: Bounds): Paddle {
  * walls, and resolves the bottom band: caught by the paddle it bounces back
  * up; missed (its bottom edge clears the paddle's bottom edge without
  * overlapping the paddle's x-range) it's game over.
+ *
+ * `difficulty` selects only how the win condition is evaluated (see
+ * Difficulty) — defaults to DEFAULT_DIFFICULTY so existing callers keep
+ * today's relaxed-corner behaviour unless they opt into Hard.
  */
-export function stepBall(ball: Ball, paddle: Paddle, bounds: Bounds, dt: number): StepResult {
+export function stepBall(
+  ball: Ball,
+  paddle: Paddle,
+  bounds: Bounds,
+  dt: number,
+  difficulty: Difficulty = DEFAULT_DIFFICULTY,
+): StepResult {
   let x = ball.x + ball.vx * dt;
   let y = ball.y + ball.vy * dt;
   let vx = ball.vx;
@@ -148,6 +189,7 @@ export function stepBall(ball: Ball, paddle: Paddle, bounds: Bounds, dt: number)
   }
 
   const cornerHit = hitXWall && hitTopWall;
+  const win = difficulty === "hard" ? cornerHit : isInCornerWinZone(x, y, ball.w, bounds);
   let bounced = false;
   let gameOver = false;
 
@@ -184,7 +226,7 @@ export function stepBall(ball: Ball, paddle: Paddle, bounds: Bounds, dt: number)
     ball: { ...ball, x, y, vx, vy },
     wallHit: hitXWall || hitTopWall,
     cornerHit,
-    win: cornerHit,
+    win,
     bounced,
     gameOver,
   };
@@ -209,9 +251,10 @@ export function stepGame(
   bounds: Bounds,
   dt: number,
   paused: boolean,
+  difficulty: Difficulty = DEFAULT_DIFFICULTY,
 ): StepResult {
   if (paused) return { ball, ...FROZEN_STEP };
-  return stepBall(ball, paddle, bounds, dt);
+  return stepBall(ball, paddle, bounds, dt, difficulty);
 }
 
 /**
@@ -461,6 +504,7 @@ export function stepEntities(
   bounds: Bounds,
   dt: number,
   paused: boolean,
+  difficulty: Difficulty = DEFAULT_DIFFICULTY,
 ): EntitiesStepResult {
   if (paused) {
     const main = balls.find((b) => !isSmallBall(b)) ?? balls[0]!;
@@ -472,7 +516,7 @@ export function stepEntities(
     };
   }
 
-  const stepped = balls.map((ball) => stepBall(ball, paddle, bounds, dt));
+  const stepped = balls.map((ball) => stepBall(ball, paddle, bounds, dt, difficulty));
   const { balls: resolved, collided } = resolveBallCollisionsWithFlags(stepped.map((s) => s.ball));
 
   const kept: Ball[] = [];
