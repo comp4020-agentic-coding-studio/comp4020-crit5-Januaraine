@@ -19,6 +19,13 @@ export interface Ball extends Rect {
    * paddle just disappears.
    */
   kind?: "small";
+  /**
+   * Opaque identity tag assigned by the rendering layer (main.ts) so a
+   * per-logo effect like the speed-boost trail can track "this logo's own
+   * history" across frames even though every step function returns new Ball
+   * objects. Never read by any collision/physics/scoring function here.
+   */
+  id?: number;
 }
 
 export type Paddle = Rect;
@@ -234,6 +241,79 @@ export const SPEED_BOOST_DURATION_MS = 5000;
 
 export function isSmallBall(ball: Ball): boolean {
   return ball.kind === "small";
+}
+
+/**
+ * The speed boost's own active/remaining-time state, expressed in the same
+ * "game time" clock as advanceGameTime (ms, only advances while unpaused) so
+ * the rendering layer can read a single source of truth for both the actual
+ * boosted velocity and the on-screen countdown — never a second timer that
+ * could drift out of sync with it.
+ */
+export interface SpeedBoostState {
+  active: boolean;
+  /** Game-time (ms) at which the boost ends. Meaningless while inactive. */
+  endsAt: number;
+}
+
+export const INITIAL_SPEED_BOOST_STATE: SpeedBoostState = { active: false, endsAt: 0 };
+
+/** Starts (or refreshes) the boost so it lasts SPEED_BOOST_DURATION_MS from `now`. */
+export function activateSpeedBoost(now: number): SpeedBoostState {
+  return { active: true, endsAt: now + SPEED_BOOST_DURATION_MS };
+}
+
+/** Clears the active flag without discarding endsAt, in case it's still useful for logging/debugging. */
+export function deactivateSpeedBoost(state: SpeedBoostState): SpeedBoostState {
+  return { ...state, active: false };
+}
+
+/** True once `now` has reached the boost's end time; always false while inactive. */
+export function speedBoostExpired(state: SpeedBoostState, now: number): boolean {
+  return state.active && now >= state.endsAt;
+}
+
+/** Milliseconds of boost remaining at `now`; 0 when inactive or already expired. */
+export function speedBoostRemainingMs(state: SpeedBoostState, now: number): number {
+  return state.active ? Math.max(0, state.endsAt - now) : 0;
+}
+
+/**
+ * Advances the pause-aware game clock that SpeedBoostState is measured
+ * against: it only ticks forward while `paused` is false, so pausing freezes
+ * the boost's remaining time (and anything else timed off it) exactly, and
+ * resumes from precisely where it left off.
+ */
+export function advanceGameTime(gameTime: number, dt: number, paused: boolean): number {
+  return paused ? gameTime : gameTime + dt * 1000;
+}
+
+/**
+ * A single fading afterimage of one logo's wordmark left behind while the
+ * speed boost is active. Deliberately carries no w/h/vx/vy — it is pure
+ * render data and cannot be mistaken for (or passed to any function
+ * expecting) a Rect/Ball, so it can never participate in collision
+ * detection, physics, scoring, or win/game-over checks. `scale` mirrors
+ * whichever logo (main or a smaller clone) produced the entry, so its
+ * afterimage is drawn at the same size as that logo.
+ */
+export interface TrailEntry {
+  x: number;
+  y: number;
+  color: string;
+  scale: number;
+}
+
+/** Small fixed cap on afterimages so the trail stays lightweight (reused/updated, never grows unbounded). */
+export const TRAIL_LENGTH = 6;
+
+/** Prepends `entry` and trims to `maxLength`, keeping the array a small fixed size regardless of call count. */
+export function pushTrailEntry(
+  trail: TrailEntry[],
+  entry: TrailEntry,
+  maxLength: number = TRAIL_LENGTH,
+): TrailEntry[] {
+  return [entry, ...trail].slice(0, maxLength);
 }
 
 /** True on the exact catch that should grant the speed-boost skill (the 5th, 10th, 15th, ... cumulative catch). */

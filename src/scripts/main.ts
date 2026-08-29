@@ -1,4 +1,6 @@
 import {
+  activateSpeedBoost,
+  advanceGameTime,
   BALL_HEIGHT,
   BALL_WIDTH,
   catchTriggersSpeedBoost,
@@ -6,19 +8,26 @@ import {
   createInitialPaddle,
   createInputState,
   createSmallBalls,
+  deactivateSpeedBoost,
+  INITIAL_SPEED_BOOST_STATE,
   movePaddle,
+  pushTrailEntry,
   resolvePaddleDelta,
   setInputKey,
   setInputPointer,
   SMALL_BALL_SCALE,
-  SPEED_BOOST_DURATION_MS,
+  speedBoostExpired,
+  speedBoostRemainingMs,
   SPEED_BOOST_MULTIPLIER,
   stepEntities,
   togglePause,
+  TRAIL_LENGTH,
   wallHitTriggersSpawn,
   type Ball,
   type InputState,
   type Paddle,
+  type SpeedBoostState,
+  type TrailEntry,
 } from "./dvd-game";
 
 const WORDMARK_TEXT = "DVD";
@@ -72,18 +81,38 @@ function initGame(
   const PADDLE_SPEED = 390; // px/s
   const COLORS = ["#39ff88", "#ff4d6d", "#ffd93d", "#4dd2ff", "#c77dff"];
   const MOVE_KEYS = new Set(["KeyA", "KeyD", "ArrowLeft", "ArrowRight", "Space"]);
+  // Trail is sampled on a fixed cadence of gameTime (not every frame) so its
+  // TRAIL_LENGTH afterimages span a visible stretch of history regardless of
+  // frame rate, and alpha is capped below 1 so the real logo (drawn at full
+  // opacity right after) always reads as the most visible thing on screen.
+  const TRAIL_SAMPLE_INTERVAL_MS = 45;
+  const TRAIL_MAX_ALPHA = 0.45;
+  const BOOST_HUD_COLOR = "#ffd93d";
 
   // Text/font never change at runtime, so the ink bounding box is measured
   // once and reused as the collision size for every ball created below.
   const wordmark = measureWordmark(ctx);
 
-  let balls: Ball[] = [createInitialBall(bounds, wordmark)];
+  // Every logo (main or small) is tagged with its own id as soon as it's
+  // created, purely so the trail below can track "this logo's history"
+  // across frames — stepEntities returns fresh Ball objects every step, so
+  // object identity can't be used for that.
+  let nextBallId = 1;
+  let balls: Ball[] = [{ ...createInitialBall(bounds, wordmark), id: nextBallId++ }];
   let paddle: Paddle = createInitialPaddle(bounds);
   let colorIndex = 0;
   let catchCount = 0;
   let collisionCount = 0;
-  let boosted = false;
-  let speedBoostUntil = 0;
+  let speedBoost: SpeedBoostState = INITIAL_SPEED_BOOST_STATE;
+  // Pause-aware clock (only advances while !paused) that SpeedBoostState and
+  // the trail's sample cadence are measured against, so both freeze exactly
+  // on pause and resume from precisely where they left off.
+  let gameTime = 0;
+  // One small fixed-length trail per currently-alive logo, keyed by its id.
+  // Dead ids (a small logo missed the paddle) are pruned every sample tick
+  // so the map never grows past however many logos are actually on screen.
+  let trails: Map<number, TrailEntry[]> = new Map();
+  let lastTrailSampleAt = -Infinity;
   let running = true;
   let paused = false;
   let flashUntil = 0;
@@ -96,13 +125,16 @@ function initGame(
   }
 
   function reset(): void {
-    balls = [createInitialBall(bounds, wordmark)];
+    nextBallId = 1;
+    balls = [{ ...createInitialBall(bounds, wordmark), id: nextBallId++ }];
     paddle = createInitialPaddle(bounds);
     colorIndex = 0;
     catchCount = 0;
     collisionCount = 0;
-    boosted = false;
-    speedBoostUntil = 0;
+    speedBoost = INITIAL_SPEED_BOOST_STATE;
+    gameTime = 0;
+    trails = new Map();
+    lastTrailSampleAt = -Infinity;
     input = createInputState();
     flashUntil = 0;
     running = true;
@@ -114,35 +146,81 @@ function initGame(
     requestAnimationFrame(loop);
   }
 
-  function drawBall(logo: Ball): void {
-    // Small interference logos render at SMALL_BALL_SCALE so their drawn ink
-    // matches the smaller collision rect createSmallBalls gave them.
-    const scale = logo.kind === "small" ? SMALL_BALL_SCALE : 1;
-    ctx.fillStyle = logo.color;
+  /**
+   * Shared glyph-drawing primitive behind both the real logos and the trail's
+   * afterimages, so a trail entry is guaranteed to render as the exact same
+   * wordmark artwork — never a placeholder rectangle — just at reduced alpha.
+   */
+  function drawWordmark(x: number, y: number, color: string, scale: number, alpha: number = 1): void {
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = color;
     ctx.font = `italic bold ${WORDMARK_FONT_SIZE * scale}px "Courier New", ui-monospace, monospace`;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     // Anchor offset by the measured ink bounds, not the box center, so the
     // drawn glyphs land exactly on the logo's collision rect (see
     // measureWordmark).
-    ctx.fillText(WORDMARK_TEXT, logo.x + wordmark.offsetX * scale, logo.y + wordmark.offsetY * scale);
+    ctx.fillText(WORDMARK_TEXT, x + wordmark.offsetX * scale, y + wordmark.offsetY * scale);
+    ctx.restore();
   }
 
-  function draw(): void {
-    const flashing = performance.now() < flashUntil;
+  function drawBall(logo: Ball): void {
+    // Small interference logos render at SMALL_BALL_SCALE so their drawn ink
+    // matches the smaller collision rect createSmallBalls gave them.
+    const scale = logo.kind === "small" ? SMALL_BALL_SCALE : 1;
+    drawWordmark(logo.x, logo.y, logo.color, scale);
+  }
+
+  /**
+   * Fading afterimages of every currently-boosted logo (main and small
+   * alike), oldest (faintest) drawn first so each logo's most recent trail
+   * entry — and the real logo, drawn at full opacity right after — sit
+   * visually on top of its own trail.
+   */
+  function drawTrail(): void {
+    for (const entries of trails.values()) {
+      const len = entries.length;
+      for (let i = 0; i < len; i++) {
+        const entry = entries[i]!;
+        const recency = (len - i) / len; // 1 for the newest entry, smallest for the oldest
+        drawWordmark(entry.x, entry.y, entry.color, entry.scale, TRAIL_MAX_ALPHA * recency);
+      }
+    }
+  }
+
+  /** "SPEED UP n.n" countdown, purely reflecting speedBoostRemainingMs — hidden once the boost isn't active. */
+  function drawSpeedBoostHud(remainingMs: number): void {
+    if (remainingMs <= 0) return;
+    ctx.save();
+    ctx.font = `bold 16px "Courier New", ui-monospace, monospace`;
+    ctx.textAlign = "right";
+    ctx.textBaseline = "top";
+    ctx.fillStyle = BOOST_HUD_COLOR;
+    ctx.fillText(`SPEED UP ${(remainingMs / 1000).toFixed(1)}`, bounds.w - 10, 10);
+    ctx.restore();
+  }
+
+  function draw(time: number): void {
+    const flashing = time < flashUntil;
     ctx.fillStyle = flashing ? "#ffffff" : "#000000";
     ctx.fillRect(0, 0, bounds.w, bounds.h);
 
+    drawTrail();
     for (const logo of balls) drawBall(logo);
 
     ctx.fillStyle = "#e6e6f0";
     ctx.fillRect(paddle.x, paddle.y, paddle.w, paddle.h);
+
+    drawSpeedBoostHud(speedBoostRemainingMs(speedBoost, gameTime));
   }
 
   function loop(time: number): void {
     if (!running) return;
     const dt = Math.min((time - lastTime) / 1000, 0.05);
     lastTime = time;
+
+    gameTime = advanceGameTime(gameTime, dt, paused);
 
     if (!paused) {
       const dx = resolvePaddleDelta(input, paddle, PADDLE_SPEED, dt);
@@ -172,39 +250,58 @@ function initGame(
       collisionCount += 1;
       if (wallHitTriggersSpawn(collisionCount) && !main.win) {
         const mainLogo = balls.find((logo) => logo.kind !== "small")!;
-        balls = [...balls, ...createSmallBalls(mainLogo, bounds)];
+        const spawned = createSmallBalls(mainLogo, bounds).map((logo) => ({ ...logo, id: nextBallId++ }));
+        balls = [...balls, ...spawned];
       }
     }
 
     if (main.bounced) {
       catchCount += 1;
       if (catchTriggersSpeedBoost(catchCount)) {
-        if (!boosted) {
-          boosted = true;
-          balls = balls.map((logo) =>
-            logo.kind === "small"
-              ? logo
-              : { ...logo, vx: logo.vx * SPEED_BOOST_MULTIPLIER, vy: logo.vy * SPEED_BOOST_MULTIPLIER },
-          );
+        // Boosts every logo currently in play, main and small alike, so the
+        // whole swarm speeds up together rather than just the main logo.
+        if (!speedBoost.active) {
+          balls = balls.map((logo) => ({
+            ...logo,
+            vx: logo.vx * SPEED_BOOST_MULTIPLIER,
+            vy: logo.vy * SPEED_BOOST_MULTIPLIER,
+          }));
         }
-        speedBoostUntil = time + SPEED_BOOST_DURATION_MS;
+        speedBoost = activateSpeedBoost(gameTime);
       }
     }
 
-    if (boosted && time >= speedBoostUntil) {
-      boosted = false;
-      balls = balls.map((logo) =>
-        logo.kind === "small"
-          ? logo
-          : { ...logo, vx: logo.vx / SPEED_BOOST_MULTIPLIER, vy: logo.vy / SPEED_BOOST_MULTIPLIER },
-      );
+    if (speedBoostExpired(speedBoost, gameTime)) {
+      speedBoost = deactivateSpeedBoost(speedBoost);
+      balls = balls.map((logo) => ({
+        ...logo,
+        vx: logo.vx / SPEED_BOOST_MULTIPLIER,
+        vy: logo.vy / SPEED_BOOST_MULTIPLIER,
+      }));
+      trails.clear();
+    }
+
+    if (!paused && speedBoost.active && gameTime - lastTrailSampleAt >= TRAIL_SAMPLE_INTERVAL_MS) {
+      lastTrailSampleAt = gameTime;
+      const aliveIds = new Set(balls.map((logo) => logo.id));
+      for (const id of trails.keys()) {
+        if (!aliveIds.has(id)) trails.delete(id);
+      }
+      for (const logo of balls) {
+        const scale = logo.kind === "small" ? SMALL_BALL_SCALE : 1;
+        const prior = trails.get(logo.id!) ?? [];
+        trails.set(
+          logo.id!,
+          pushTrailEntry(prior, { x: logo.x, y: logo.y, color: logo.color, scale }, TRAIL_LENGTH),
+        );
+      }
     }
 
     if (main.cornerHit) {
       flashUntil = time + 150;
     }
 
-    draw();
+    draw(time);
 
     if (main.gameOver) {
       running = false;
@@ -264,7 +361,7 @@ function initGame(
   restartButton.addEventListener("click", reset);
   restartWinButton.addEventListener("click", reset);
 
-  draw();
+  draw(performance.now());
   requestAnimationFrame(loop);
 }
 

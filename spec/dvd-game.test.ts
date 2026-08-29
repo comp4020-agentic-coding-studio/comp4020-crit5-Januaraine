@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  activateSpeedBoost,
+  advanceGameTime,
   BALL_HEIGHT,
   BALL_WIDTH,
   CATCH_SKILL_THRESHOLD,
@@ -7,11 +9,14 @@ import {
   createInitialPaddle,
   createInputState,
   createSmallBalls,
+  deactivateSpeedBoost,
+  INITIAL_SPEED_BOOST_STATE,
   MAX_BOUNCE_ANGLE,
   MAX_SPEED,
   MIN_SPEED,
   MIN_VERTICAL_RATIO,
   movePaddle,
+  pushTrailEntry,
   resolveBallCollisions,
   resolvePaddleDelta,
   setInputKey,
@@ -19,13 +24,19 @@ import {
   SMALL_BALL_SCALE,
   SPAWN_COLLISION_THRESHOLD,
   SPAWN_COUNT,
+  speedBoostExpired,
+  speedBoostRemainingMs,
+  SPEED_BOOST_DURATION_MS,
+  SPEED_BOOST_MULTIPLIER,
   stepBall,
   stepEntities,
   stepGame,
   togglePause,
+  TRAIL_LENGTH,
   wallHitTriggersSpawn,
   type Ball,
   type Bounds,
+  type TrailEntry,
 } from "../src/scripts/dvd-game";
 
 const bounds: Bounds = { w: 720, h: 480 };
@@ -565,5 +576,149 @@ describe("input state: keyboard/mouse independence", () => {
     // No move key is held and keyboard is still the active source, so there
     // should be no movement — not a snap back to the old pointer position.
     expect(resolvePaddleDelta(state, paddle, speed, dt)).toBe(0);
+  });
+});
+
+describe("speed-boost countdown state", () => {
+  it("starts at the full boost duration the instant the boost starts", () => {
+    const state = activateSpeedBoost(1000);
+    expect(state.active).toBe(true);
+    expect(speedBoostRemainingMs(state, 1000)).toBe(SPEED_BOOST_DURATION_MS);
+  });
+
+  it("decreases in lockstep with elapsed game time, using the real boost duration", () => {
+    const state = activateSpeedBoost(1000);
+    expect(speedBoostRemainingMs(state, 1000 + 1000)).toBe(SPEED_BOOST_DURATION_MS - 1000);
+    expect(speedBoostRemainingMs(state, 1000 + 2500)).toBe(SPEED_BOOST_DURATION_MS - 2500);
+    expect(speedBoostRemainingMs(state, 1000 + SPEED_BOOST_DURATION_MS)).toBe(0);
+  });
+
+  it("reports 0 remaining whenever inactive, regardless of `now`", () => {
+    expect(speedBoostRemainingMs(INITIAL_SPEED_BOOST_STATE, 999999)).toBe(0);
+  });
+
+  it("is not expired before its end time, and expired at/after it", () => {
+    const state = activateSpeedBoost(0);
+    expect(speedBoostExpired(state, SPEED_BOOST_DURATION_MS - 1)).toBe(false);
+    expect(speedBoostExpired(state, SPEED_BOOST_DURATION_MS)).toBe(true);
+    expect(speedBoostExpired(state, SPEED_BOOST_DURATION_MS + 500)).toBe(true);
+  });
+
+  it("never reports expired while inactive", () => {
+    expect(speedBoostExpired(INITIAL_SPEED_BOOST_STATE, 999999)).toBe(false);
+  });
+
+  it("disappears (remaining becomes 0) once deactivated after expiry", () => {
+    const expired = deactivateSpeedBoost(activateSpeedBoost(0));
+    expect(expired.active).toBe(false);
+    expect(speedBoostRemainingMs(expired, SPEED_BOOST_DURATION_MS)).toBe(0);
+  });
+});
+
+describe("advanceGameTime: pause freezes the boost clock", () => {
+  it("advances by dt while unpaused", () => {
+    expect(advanceGameTime(1000, 0.1, false)).toBe(1100);
+  });
+
+  it("does not advance at all while paused", () => {
+    expect(advanceGameTime(1000, 0.1, true)).toBe(1000);
+  });
+
+  it("stays frozen across many paused ticks, then resumes exactly where it left off", () => {
+    let gameTime = 500;
+    for (let i = 0; i < 10; i++) gameTime = advanceGameTime(gameTime, 0.016, true);
+    expect(gameTime).toBe(500);
+
+    gameTime = advanceGameTime(gameTime, 0.016, false);
+    expect(gameTime).toBeCloseTo(516, 5);
+  });
+
+  it("keeps the boost countdown static while the game-time clock it reads is paused", () => {
+    let gameTime = 0;
+    const boost = activateSpeedBoost(gameTime);
+    const remainingBeforePause = speedBoostRemainingMs(boost, gameTime);
+
+    for (let i = 0; i < 5; i++) {
+      gameTime = advanceGameTime(gameTime, 0.1, true);
+      expect(speedBoostRemainingMs(boost, gameTime)).toBe(remainingBeforePause);
+    }
+  });
+});
+
+describe("motion trail: visual-only afterimages", () => {
+  function makeEntry(overrides: Partial<TrailEntry> = {}): TrailEntry {
+    return { x: 10, y: 20, color: "#39ff88", scale: 1, ...overrides };
+  }
+
+  it("carries only x/y/color/scale — no w/h/vx/vy, so it can never be treated as a Rect/Ball for collisions", () => {
+    const entry = makeEntry();
+    const asBag = entry as unknown as Record<string, unknown>;
+    expect(Object.keys(entry).sort()).toEqual(["color", "scale", "x", "y"]);
+    expect(asBag["w"]).toBeUndefined();
+    expect(asBag["h"]).toBeUndefined();
+    expect(asBag["vx"]).toBeUndefined();
+    expect(asBag["vy"]).toBeUndefined();
+  });
+
+  it("prepends the newest entry to the front of the trail", () => {
+    const trail = pushTrailEntry([makeEntry({ x: 1 })], makeEntry({ x: 2 }));
+    expect(trail[0]).toEqual(makeEntry({ x: 2 }));
+    expect(trail[1]).toEqual(makeEntry({ x: 1 }));
+  });
+
+  it("caps the trail at a small fixed length (TRAIL_LENGTH), reusing the array instead of growing unbounded", () => {
+    let trail: TrailEntry[] = [];
+    for (let i = 0; i < 50; i++) {
+      trail = pushTrailEntry(trail, makeEntry({ x: i }));
+      expect(trail.length).toBeLessThanOrEqual(TRAIL_LENGTH);
+    }
+    expect(trail.length).toBe(TRAIL_LENGTH);
+    // Most recently pushed entry (x: 49) is still the most recent (front).
+    expect(trail[0]!.x).toBe(49);
+  });
+
+  it("respects a custom max length", () => {
+    let trail: TrailEntry[] = [];
+    for (let i = 0; i < 10; i++) trail = pushTrailEntry(trail, makeEntry({ x: i }), 3);
+    expect(trail.length).toBe(3);
+  });
+
+  it("carries whichever scale the producing logo was drawn at, so a small logo's afterimage matches its own size", () => {
+    const trail = pushTrailEntry([], makeEntry({ scale: 0.5 }));
+    expect(trail[0]!.scale).toBe(0.5);
+  });
+});
+
+describe("speed-boost visual feedback: existing boost behaviour is unchanged", () => {
+  it("keeps the existing multiplier and duration constants exactly as before", () => {
+    expect(SPEED_BOOST_MULTIPLIER).toBe(1.7);
+    expect(SPEED_BOOST_DURATION_MS).toBe(5000);
+  });
+
+  it("keeps the existing catch-count trigger rule (every 5th cumulative catch)", () => {
+    expect(catchTriggersSpeedBoost(CATCH_SKILL_THRESHOLD)).toBe(true);
+    expect(catchTriggersSpeedBoost(CATCH_SKILL_THRESHOLD - 1)).toBe(false);
+  });
+
+  it("still preserves incoming speed on a paddle catch while boosted-magnitude velocities are in play", () => {
+    // Regression check that the paddle-bounce physics (independent of the
+    // new boost-state/trail code) is untouched: a catch at boosted speed
+    // still reflects elastically within [MIN_SPEED, MAX_SPEED].
+    const paddle = createInitialPaddle(bounds);
+    const boostedSpeed = Math.hypot(210, 180) * SPEED_BOOST_MULTIPLIER;
+    const ball: Ball = {
+      x: paddle.x + paddle.w / 2 - BALL_WIDTH / 2,
+      y: paddle.y - 1,
+      w: BALL_WIDTH,
+      h: BALL_HEIGHT,
+      vx: 0,
+      vy: boostedSpeed,
+      color: "#39ff88",
+    };
+    const result = stepBall(ball, paddle, bounds, 0.1);
+    expect(result.bounced).toBe(true);
+    const outgoingSpeed = Math.hypot(result.ball.vx, result.ball.vy);
+    expect(outgoingSpeed).toBeGreaterThanOrEqual(MIN_SPEED - 1e-6);
+    expect(outgoingSpeed).toBeLessThanOrEqual(MAX_SPEED + 1e-6);
   });
 });
