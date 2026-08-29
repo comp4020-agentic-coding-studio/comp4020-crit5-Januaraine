@@ -2,15 +2,28 @@ import { describe, expect, it } from "vitest";
 import {
   BALL_HEIGHT,
   BALL_WIDTH,
+  CATCH_SKILL_THRESHOLD,
+  catchTriggersSpeedBoost,
   createInitialPaddle,
   createInputState,
+  createSmallBalls,
+  MAX_BOUNCE_ANGLE,
+  MAX_SPEED,
+  MIN_SPEED,
+  MIN_VERTICAL_RATIO,
   movePaddle,
+  resolveBallCollisions,
   resolvePaddleDelta,
   setInputKey,
   setInputPointer,
+  SMALL_BALL_SCALE,
+  SPAWN_COLLISION_THRESHOLD,
+  SPAWN_COUNT,
   stepBall,
+  stepEntities,
   stepGame,
   togglePause,
+  wallHitTriggersSpawn,
   type Ball,
   type Bounds,
 } from "../src/scripts/dvd-game";
@@ -126,6 +139,73 @@ describe("stepBall: paddle band", () => {
   });
 });
 
+describe("stepBall: paddle bounce physics", () => {
+  function catchAt(offset: number, vx: number, vy: number) {
+    const paddle = createInitialPaddle(bounds);
+    const paddleCenter = paddle.x + paddle.w / 2;
+    const ballCenter = paddleCenter + offset * (paddle.w / 2);
+    const ball = makeBall({ x: ballCenter - BALL_WIDTH / 2, y: paddle.y - 1, vx, vy });
+    return { paddle, result: stepBall(ball, paddle, bounds, 0.1) };
+  }
+
+  it("sends a centre hit mostly/purely upward", () => {
+    const { result } = catchAt(0, 0, 200);
+    expect(result.bounced).toBe(true);
+    expect(result.ball.vy).toBeLessThan(0);
+    expect(result.ball.vx).toBeCloseTo(0, 5);
+  });
+
+  it("sends a left-edge hit diagonally up-left (negative vx, upward vy)", () => {
+    const { result } = catchAt(-1, 50, 200);
+    expect(result.ball.vx).toBeLessThan(0);
+    expect(result.ball.vy).toBeLessThan(0);
+  });
+
+  it("sends a right-edge hit diagonally up-right (positive vx)", () => {
+    const { result } = catchAt(1, -50, 200);
+    expect(result.ball.vx).toBeGreaterThan(0);
+    expect(result.ball.vy).toBeLessThan(0);
+  });
+
+  it("preserves the incoming speed (within the MIN/MAX_SPEED band) rather than losing or adding energy", () => {
+    const incomingSpeed = Math.hypot(150, 200);
+    const { result } = catchAt(0.3, 150, 200);
+    expect(Math.hypot(result.ball.vx, result.ball.vy)).toBeCloseTo(incomingSpeed, 5);
+  });
+
+  it("never lets the outgoing vertical component collapse toward zero, even on an extreme edge hit", () => {
+    const { result } = catchAt(1, 0, 500);
+    const speed = Math.hypot(result.ball.vx, result.ball.vy);
+    expect(Math.abs(result.ball.vy)).toBeGreaterThanOrEqual(speed * Math.cos(MAX_BOUNCE_ANGLE) - 1e-6);
+  });
+
+  it("never bounces the ball into an almost-horizontal trajectory, at any hit offset", () => {
+    for (const offset of [-1, -0.5, 0, 0.5, 1]) {
+      const { result } = catchAt(offset, 100, 300);
+      const angleFromVertical = Math.atan2(Math.abs(result.ball.vx), Math.abs(result.ball.vy));
+      expect(angleFromVertical).toBeLessThanOrEqual(MAX_BOUNCE_ANGLE + 1e-9);
+    }
+  });
+
+  it("keeps speed bounded across many repeated catches, without growing unbounded or decaying toward zero", () => {
+    const paddle = createInitialPaddle(bounds);
+    let vx = 900;
+    let vy = 900;
+    for (let i = 0; i < 25; i++) {
+      const offset = i % 2 === 0 ? -1 : 1;
+      const paddleCenter = paddle.x + paddle.w / 2;
+      const x = paddleCenter + offset * (paddle.w / 2) - BALL_WIDTH / 2;
+      const ball = makeBall({ x, y: paddle.y - 1, vx, vy });
+      const result = stepBall(ball, paddle, bounds, 0.1);
+      vx = result.ball.vx;
+      vy = result.ball.vy;
+      const speed = Math.hypot(vx, vy);
+      expect(speed).toBeGreaterThanOrEqual(MIN_SPEED - 1e-6);
+      expect(speed).toBeLessThanOrEqual(MAX_SPEED + 1e-6);
+    }
+  });
+});
+
 describe("stepGame: pause", () => {
   it("freezes the ball and suspends every collision/win/game-over check while paused", () => {
     const paddle = createInitialPaddle(bounds);
@@ -179,6 +259,225 @@ describe("movePaddle", () => {
   it("clamps to the right edge", () => {
     const paddle = createInitialPaddle(bounds);
     expect(movePaddle(paddle, 10000, bounds).x).toBe(bounds.w - paddle.w);
+  });
+});
+
+describe("catchTriggersSpeedBoost: catch-count speed-boost skill", () => {
+  it("is false before the first threshold", () => {
+    for (let n = 0; n < CATCH_SKILL_THRESHOLD; n++) {
+      expect(catchTriggersSpeedBoost(n)).toBe(false);
+    }
+  });
+
+  it("fires on every multiple of the threshold, cumulatively", () => {
+    expect(catchTriggersSpeedBoost(CATCH_SKILL_THRESHOLD)).toBe(true);
+    expect(catchTriggersSpeedBoost(CATCH_SKILL_THRESHOLD * 2)).toBe(true);
+    expect(catchTriggersSpeedBoost(CATCH_SKILL_THRESHOLD * 3)).toBe(true);
+  });
+
+  it("is false between thresholds", () => {
+    expect(catchTriggersSpeedBoost(CATCH_SKILL_THRESHOLD + 1)).toBe(false);
+    expect(catchTriggersSpeedBoost(CATCH_SKILL_THRESHOLD * 2 - 1)).toBe(false);
+  });
+});
+
+describe("wallHitTriggersSpawn: collision-count logo spawning", () => {
+  it("is false before the first threshold", () => {
+    for (let n = 0; n < SPAWN_COLLISION_THRESHOLD; n++) {
+      expect(wallHitTriggersSpawn(n)).toBe(false);
+    }
+  });
+
+  it("fires on every multiple of the threshold, cumulatively", () => {
+    expect(wallHitTriggersSpawn(SPAWN_COLLISION_THRESHOLD)).toBe(true);
+    expect(wallHitTriggersSpawn(SPAWN_COLLISION_THRESHOLD * 2)).toBe(true);
+  });
+
+  it("is false between thresholds", () => {
+    expect(wallHitTriggersSpawn(SPAWN_COLLISION_THRESHOLD + 1)).toBe(false);
+  });
+});
+
+describe("createSmallBalls", () => {
+  const main: Ball = {
+    x: 300,
+    y: 200,
+    w: BALL_WIDTH,
+    h: BALL_HEIGHT,
+    vx: 210,
+    vy: 180,
+    color: "#39ff88",
+  };
+
+  it("spawns SPAWN_COUNT small logos, scaled down and flagged as small", () => {
+    const spawned = createSmallBalls(main, bounds);
+    expect(spawned).toHaveLength(SPAWN_COUNT);
+    for (const logo of spawned) {
+      expect(logo.kind).toBe("small");
+      expect(logo.w).toBeCloseTo(main.w * SMALL_BALL_SCALE);
+      expect(logo.h).toBeCloseTo(main.h * SMALL_BALL_SCALE);
+    }
+  });
+
+  it("launches each small logo at the main logo's current speed, in a distinct direction", () => {
+    const speed = Math.hypot(main.vx, main.vy);
+    const spawned = createSmallBalls(main, bounds);
+    for (const logo of spawned) {
+      expect(Math.hypot(logo.vx, logo.vy)).toBeCloseTo(speed);
+    }
+    const angles = new Set(spawned.map((logo) => Math.atan2(logo.vy, logo.vx).toFixed(3)));
+    expect(angles.size).toBe(SPAWN_COUNT);
+  });
+
+  it("keeps every spawned logo within bounds", () => {
+    const spawned = createSmallBalls(main, bounds);
+    for (const logo of spawned) {
+      expect(logo.x).toBeGreaterThanOrEqual(0);
+      expect(logo.y).toBeGreaterThanOrEqual(0);
+      expect(logo.x + logo.w).toBeLessThanOrEqual(bounds.w);
+      expect(logo.y + logo.h).toBeLessThanOrEqual(bounds.h);
+    }
+  });
+});
+
+describe("resolveBallCollisions", () => {
+  it("leaves non-overlapping logos untouched", () => {
+    const a = { x: 0, y: 0, w: 20, h: 20, vx: 10, vy: 0, color: "#fff" };
+    const b = { x: 200, y: 200, w: 20, h: 20, vx: -10, vy: 0, color: "#fff" };
+    const [ra, rb] = resolveBallCollisions([a, b]);
+    expect(ra).toEqual(a);
+    expect(rb).toEqual(b);
+  });
+
+  it("swaps velocity along the axis of least penetration and separates overlapping logos", () => {
+    // Overlap only on x: a's right edge pokes 4px into b's left edge.
+    // Speeds are chosen inside [MIN_SPEED, MAX_SPEED] with a healthy vertical
+    // share so the post-swap safety clamp is a no-op here — this test is
+    // only about the swap/separation mechanics.
+    const a = { x: 0, y: 0, w: 20, h: 20, vx: 150, vy: 200, color: "#fff" };
+    const b = { x: 16, y: 0, w: 20, h: 20, vx: -150, vy: 200, color: "#fff" };
+    const [ra, rb] = resolveBallCollisions([a, b]);
+
+    expect(ra.vx).toBe(-150);
+    expect(rb.vx).toBe(150);
+    expect(ra.vy).toBe(200);
+    expect(rb.vy).toBe(200);
+    // Pushed apart so they no longer overlap.
+    expect(ra.x + ra.w).toBeLessThanOrEqual(rb.x);
+  });
+
+  it("boosts a logo that would come out of a collision far too slow up to MIN_SPEED", () => {
+    // a's vx is swapped away almost entirely, and its untouched vy is tiny —
+    // without the post-swap clamp this logo would crawl at ~sqrt(1^2+2^2).
+    const a = { x: 0, y: 0, w: 20, h: 20, vx: 1, vy: 2, color: "#fff" };
+    const b = { x: 16, y: 0, w: 20, h: 20, vx: 50, vy: 300, color: "#fff" };
+    const [ra] = resolveBallCollisions([a, b]);
+    expect(Math.hypot(ra.vx, ra.vy)).toBeGreaterThanOrEqual(MIN_SPEED - 1e-6);
+  });
+
+  it("caps a logo that would come out of a collision far too fast down to MAX_SPEED", () => {
+    // Overlap is smaller on x than y, so vx swaps: a inherits b's vx=900
+    // while keeping its own vy=900, which would otherwise be ~1273px/s.
+    const a = { x: 0, y: 0, w: 20, h: 20, vx: 10, vy: 900, color: "#fff" };
+    const b = { x: 16, y: 0, w: 20, h: 20, vx: 900, vy: 20, color: "#fff" };
+    const [ra] = resolveBallCollisions([a, b]);
+    expect(Math.hypot(ra.vx, ra.vy)).toBeLessThanOrEqual(MAX_SPEED + 1e-6);
+  });
+
+  it("never leaves a logo on a near-horizontal path after a collision swaps its vertical speed away", () => {
+    // b's vy is swapped for a's near-zero vy, which would otherwise leave b
+    // almost purely horizontal (vx=400, vy~0) and unable to come back down.
+    const a = { x: 0, y: 16, w: 20, h: 20, vx: 100, vy: 1, color: "#fff" };
+    const b = { x: 0, y: 0, w: 20, h: 20, vx: 400, vy: 250, color: "#fff" };
+    const [, rb] = resolveBallCollisions([a, b]);
+    const speed = Math.hypot(rb.vx, rb.vy);
+    expect(Math.abs(rb.vy)).toBeGreaterThanOrEqual(speed * MIN_VERTICAL_RATIO - 1e-6);
+  });
+});
+
+describe("stepEntities: multi-logo stepping", () => {
+  const makeMain = (overrides: Partial<Ball> = {}): Ball => ({
+    x: 0,
+    y: 0,
+    w: BALL_WIDTH,
+    h: BALL_HEIGHT,
+    vx: 100,
+    vy: 100,
+    color: "#39ff88",
+    ...overrides,
+  });
+
+  it("freezes every logo and suspends all checks while paused", () => {
+    const paddle = createInitialPaddle(bounds);
+    const main = makeMain({ x: 1, y: 1, vx: -100, vy: -100 });
+    const small: Ball = { x: 500, y: 5, w: 10, h: 10, vx: -50, vy: -50, color: "#fff", kind: "small" };
+    const result = stepEntities([main, small], paddle, bounds, 0.1, true);
+
+    expect(result.balls).toEqual([main, small]);
+    expect(result.main.ball).toEqual(main);
+    expect(result.main.win).toBe(false);
+    expect(result.main.gameOver).toBe(false);
+  });
+
+  it("only the main logo's outcome can end or win the game, even if a small logo hits a corner", () => {
+    const paddle = createInitialPaddle(bounds);
+    // Main logo far from any wall this step.
+    const main = makeMain({ x: 300, y: 200, vx: 0, vy: 0 });
+    // Small logo heading straight into the top-left corner.
+    const small: Ball = { x: 1, y: 1, w: 10, h: 10, vx: -100, vy: -100, color: "#fff", kind: "small" };
+    const result = stepEntities([main, small], paddle, bounds, 0.1, false);
+
+    expect(result.main.win).toBe(false);
+    expect(result.main.gameOver).toBe(false);
+  });
+
+  it("drops a small logo that clears the paddle uncaught, without ending the game", () => {
+    const paddle = createInitialPaddle(bounds);
+    const main = makeMain({ x: 300, y: 200, vx: 0, vy: 0 });
+    const small: Ball = {
+      x: 0,
+      y: paddle.y + paddle.h + 1,
+      w: 10,
+      h: 10,
+      vx: 0,
+      vy: 100,
+      color: "#fff",
+      kind: "small",
+    };
+    const result = stepEntities([main, small], paddle, bounds, 0.1, false);
+
+    expect(result.balls).toHaveLength(1);
+    expect(result.balls[0]!.kind).not.toBe("small");
+    expect(result.main.gameOver).toBe(false);
+  });
+
+  it("reports a wallHit for each logo that bounced off a wall this step, main and small alike", () => {
+    const paddle = createInitialPaddle(bounds);
+    const main = makeMain({ x: 300, y: 200, vx: 0, vy: 0 });
+    const small: Ball = { x: 2, y: 200, w: 10, h: 10, vx: -100, vy: 0, color: "#fff", kind: "small" };
+    const result = stepEntities([main, small], paddle, bounds, 0.1, false);
+
+    expect(result.wallHits).toHaveLength(2);
+    expect(result.wallHits[0]).toBe(false);
+    expect(result.wallHits[1]).toBe(true);
+  });
+
+  it("reports a collision for both logos when they overlap each other, not for one that stays clear", () => {
+    const paddle = createInitialPaddle(bounds);
+    const main = makeMain({ x: 300, y: 300, vx: 0, vy: 0 });
+    const small: Ball = { x: 305, y: 300, w: 20, h: 20, vx: 0, vy: 0, color: "#fff", kind: "small" };
+    const clear: Ball = { x: 0, y: 0, w: 10, h: 10, vx: 0, vy: 0, color: "#fff", kind: "small" };
+    const result = stepEntities([main, small, clear], paddle, bounds, 0.1, false);
+
+    expect(result.collisions).toEqual([true, true, false]);
+  });
+
+  it("still ends the game when the main logo (not a small one) clears the paddle uncaught", () => {
+    const paddle = createInitialPaddle(bounds);
+    const main = makeMain({ x: 0, y: paddle.y + paddle.h + 1, vy: 100 });
+    const result = stepEntities([main], paddle, bounds, 0.1, false);
+
+    expect(result.main.gameOver).toBe(true);
   });
 });
 

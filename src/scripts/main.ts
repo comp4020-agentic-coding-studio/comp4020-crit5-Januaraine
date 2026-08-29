@@ -1,15 +1,21 @@
 import {
   BALL_HEIGHT,
   BALL_WIDTH,
+  catchTriggersSpeedBoost,
   createInitialBall,
   createInitialPaddle,
   createInputState,
+  createSmallBalls,
   movePaddle,
   resolvePaddleDelta,
   setInputKey,
   setInputPointer,
-  stepGame,
+  SMALL_BALL_SCALE,
+  SPEED_BOOST_DURATION_MS,
+  SPEED_BOOST_MULTIPLIER,
+  stepEntities,
   togglePause,
+  wallHitTriggersSpawn,
   type Ball,
   type InputState,
   type Paddle,
@@ -71,9 +77,13 @@ function initGame(
   // once and reused as the collision size for every ball created below.
   const wordmark = measureWordmark(ctx);
 
-  let ball: Ball = createInitialBall(bounds, wordmark);
+  let balls: Ball[] = [createInitialBall(bounds, wordmark)];
   let paddle: Paddle = createInitialPaddle(bounds);
   let colorIndex = 0;
+  let catchCount = 0;
+  let collisionCount = 0;
+  let boosted = false;
+  let speedBoostUntil = 0;
   let running = true;
   let paused = false;
   let flashUntil = 0;
@@ -86,9 +96,13 @@ function initGame(
   }
 
   function reset(): void {
-    ball = createInitialBall(bounds, wordmark);
+    balls = [createInitialBall(bounds, wordmark)];
     paddle = createInitialPaddle(bounds);
     colorIndex = 0;
+    catchCount = 0;
+    collisionCount = 0;
+    boosted = false;
+    speedBoostUntil = 0;
     input = createInputState();
     flashUntil = 0;
     running = true;
@@ -100,19 +114,26 @@ function initGame(
     requestAnimationFrame(loop);
   }
 
+  function drawBall(logo: Ball): void {
+    // Small interference logos render at SMALL_BALL_SCALE so their drawn ink
+    // matches the smaller collision rect createSmallBalls gave them.
+    const scale = logo.kind === "small" ? SMALL_BALL_SCALE : 1;
+    ctx.fillStyle = logo.color;
+    ctx.font = `italic bold ${WORDMARK_FONT_SIZE * scale}px "Courier New", ui-monospace, monospace`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    // Anchor offset by the measured ink bounds, not the box center, so the
+    // drawn glyphs land exactly on the logo's collision rect (see
+    // measureWordmark).
+    ctx.fillText(WORDMARK_TEXT, logo.x + wordmark.offsetX * scale, logo.y + wordmark.offsetY * scale);
+  }
+
   function draw(): void {
     const flashing = performance.now() < flashUntil;
     ctx.fillStyle = flashing ? "#ffffff" : "#000000";
     ctx.fillRect(0, 0, bounds.w, bounds.h);
 
-    ctx.fillStyle = ball.color;
-    ctx.font = `italic bold ${WORDMARK_FONT_SIZE}px "Courier New", ui-monospace, monospace`;
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    // Anchor offset by the measured ink bounds, not the box center, so the
-    // drawn glyphs land exactly on the ball's collision rect (see
-    // measureWordmark).
-    ctx.fillText(WORDMARK_TEXT, ball.x + wordmark.offsetX, ball.y + wordmark.offsetY);
+    for (const logo of balls) drawBall(logo);
 
     ctx.fillStyle = "#e6e6f0";
     ctx.fillRect(paddle.x, paddle.y, paddle.w, paddle.h);
@@ -128,26 +149,70 @@ function initGame(
       if (dx !== 0) paddle = movePaddle(paddle, dx, bounds);
     }
 
-    const result = stepGame(ball, paddle, bounds, dt, paused);
-    ball = result.ball;
+    const result = stepEntities(balls, paddle, bounds, dt, paused);
+    balls = result.balls;
+    const main = result.main;
 
-    if (result.wallHit) {
+    balls = balls.map((logo, i) =>
+      logo.kind === "small" && result.wallHits[i]
+        ? { ...logo, color: COLORS[(COLORS.indexOf(logo.color) + 1) % COLORS.length]! }
+        : logo,
+    );
+
+    balls = balls.map((logo, i) =>
+      result.collisions[i]
+        ? { ...logo, color: COLORS[(COLORS.indexOf(logo.color) + 1) % COLORS.length]! }
+        : logo,
+    );
+
+    if (main.wallHit) {
       colorIndex = (colorIndex + 1) % COLORS.length;
-      ball = { ...ball, color: COLORS[colorIndex]! };
+      balls = balls.map((logo) => (logo.kind === "small" ? logo : { ...logo, color: COLORS[colorIndex]! }));
+
+      collisionCount += 1;
+      if (wallHitTriggersSpawn(collisionCount) && !main.win) {
+        const mainLogo = balls.find((logo) => logo.kind !== "small")!;
+        balls = [...balls, ...createSmallBalls(mainLogo, bounds)];
+      }
     }
-    if (result.cornerHit) {
+
+    if (main.bounced) {
+      catchCount += 1;
+      if (catchTriggersSpeedBoost(catchCount)) {
+        if (!boosted) {
+          boosted = true;
+          balls = balls.map((logo) =>
+            logo.kind === "small"
+              ? logo
+              : { ...logo, vx: logo.vx * SPEED_BOOST_MULTIPLIER, vy: logo.vy * SPEED_BOOST_MULTIPLIER },
+          );
+        }
+        speedBoostUntil = time + SPEED_BOOST_DURATION_MS;
+      }
+    }
+
+    if (boosted && time >= speedBoostUntil) {
+      boosted = false;
+      balls = balls.map((logo) =>
+        logo.kind === "small"
+          ? logo
+          : { ...logo, vx: logo.vx / SPEED_BOOST_MULTIPLIER, vy: logo.vy / SPEED_BOOST_MULTIPLIER },
+      );
+    }
+
+    if (main.cornerHit) {
       flashUntil = time + 150;
     }
 
     draw();
 
-    if (result.gameOver) {
+    if (main.gameOver) {
       running = false;
       overlay.hidden = false;
       return;
     }
 
-    if (result.win) {
+    if (main.win) {
       running = false;
       winOverlay.hidden = false;
       return;
