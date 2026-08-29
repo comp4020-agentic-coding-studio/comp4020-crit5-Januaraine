@@ -33,23 +33,31 @@ export interface StepResult {
   gameOver: boolean;
 }
 
-export const BALL_SIZE = 32;
-export const PADDLE_WIDTH = 70;
-export const PADDLE_HEIGHT = 10;
-export const PADDLE_MARGIN_BOTTOM = 16;
-export const INITIAL_SPEED = { vx: 140, vy: 120 };
+// Fallback/reference dimensions for the logo's hit box. main.ts measures the
+// actual rendered glyph ink (via canvas TextMetrics) and passes that tight
+// size into createInitialBall so collision matches the visible wordmark;
+// these constants are the default used when no measured size is given (and
+// the reference height used to pick the wordmark's font size).
+export const BALL_WIDTH = 120;
+export const BALL_HEIGHT = 54;
+export const PADDLE_WIDTH = 105;
+export const PADDLE_HEIGHT = 15;
+export const PADDLE_MARGIN_BOTTOM = 24;
+export const INITIAL_SPEED = { vx: 210, vy: 180 };
 export const DEFAULT_COLOR = "#39ff88";
 
 function overlapsX(a: Rect, b: Rect): boolean {
   return a.x < b.x + b.w && a.x + a.w > b.x;
 }
 
-export function createInitialBall(bounds: Bounds): Ball {
+export function createInitialBall(bounds: Bounds, size?: { w: number; h: number }): Ball {
+  const w = size?.w ?? BALL_WIDTH;
+  const h = size?.h ?? BALL_HEIGHT;
   return {
-    x: bounds.w / 2 - BALL_SIZE / 2,
-    y: bounds.h / 3 - BALL_SIZE / 2,
-    w: BALL_SIZE,
-    h: BALL_SIZE,
+    x: bounds.w / 2 - w / 2,
+    y: bounds.h / 3 - h / 2,
+    w,
+    h,
     vx: INITIAL_SPEED.vx,
     vy: INITIAL_SPEED.vy,
     color: DEFAULT_COLOR,

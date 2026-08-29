@@ -1,4 +1,49 @@
-import { createInitialBall, createInitialPaddle, movePaddle, stepBall, type Ball, type Paddle } from "./dvd-game";
+import {
+  BALL_HEIGHT,
+  BALL_WIDTH,
+  createInitialBall,
+  createInitialPaddle,
+  movePaddle,
+  stepBall,
+  type Ball,
+  type Paddle,
+} from "./dvd-game";
+
+const WORDMARK_TEXT = "DVD";
+const WORDMARK_FONT_SIZE = Math.round(BALL_HEIGHT * 0.7);
+
+interface WordmarkBox {
+  w: number;
+  h: number;
+  /** Offset from the collision box's top-left corner to the fillText anchor. */
+  offsetX: number;
+  offsetY: number;
+}
+
+/**
+ * Measures the actual rendered ink of the wordmark (not its font em-box) so
+ * the collision rect can match the visible letters instead of the font's
+ * generous line-height/advance-width padding.
+ */
+function measureWordmark(ctx: CanvasRenderingContext2D): WordmarkBox {
+  ctx.font = `italic bold ${WORDMARK_FONT_SIZE}px "Courier New", ui-monospace, monospace`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  const metrics = ctx.measureText(WORDMARK_TEXT);
+
+  const left = metrics.actualBoundingBoxLeft ?? 0;
+  const right = metrics.actualBoundingBoxRight ?? 0;
+  const ascent = metrics.actualBoundingBoxAscent ?? 0;
+  const descent = metrics.actualBoundingBoxDescent ?? 0;
+  const w = left + right;
+  const h = ascent + descent;
+
+  if (w <= 0 || h <= 0) {
+    // actualBoundingBox* unsupported: fall back to the legacy fixed box.
+    return { w: BALL_WIDTH, h: BALL_HEIGHT, offsetX: BALL_WIDTH / 2, offsetY: BALL_HEIGHT / 2 };
+  }
+  return { w, h, offsetX: left, offsetY: ascent };
+}
 
 function initGame(
   canvas: HTMLCanvasElement,
@@ -9,11 +54,15 @@ function initGame(
   ctx.imageSmoothingEnabled = false;
 
   const bounds = { w: canvas.width, h: canvas.height };
-  const PADDLE_SPEED = 260; // px/s
+  const PADDLE_SPEED = 390; // px/s
   const COLORS = ["#39ff88", "#ff4d6d", "#ffd93d", "#4dd2ff", "#c77dff"];
   const MOVE_KEYS = new Set(["KeyA", "KeyD", "ArrowLeft", "ArrowRight", "Space"]);
 
-  let ball: Ball = createInitialBall(bounds);
+  // Text/font never change at runtime, so the ink bounding box is measured
+  // once and reused as the collision size for every ball created below.
+  const wordmark = measureWordmark(ctx);
+
+  let ball: Ball = createInitialBall(bounds, wordmark);
   let paddle: Paddle = createInitialPaddle(bounds);
   let colorIndex = 0;
   let running = true;
@@ -29,7 +78,7 @@ function initGame(
   }
 
   function reset(): void {
-    ball = createInitialBall(bounds);
+    ball = createInitialBall(bounds, wordmark);
     paddle = createInitialPaddle(bounds);
     colorIndex = 0;
     pointerX = null;
@@ -46,12 +95,13 @@ function initGame(
     ctx.fillRect(0, 0, bounds.w, bounds.h);
 
     ctx.fillStyle = ball.color;
-    ctx.fillRect(ball.x, ball.y, ball.w, ball.h);
-    ctx.fillStyle = "#000000";
-    ctx.font = "10px monospace";
+    ctx.font = `italic bold ${WORDMARK_FONT_SIZE}px "Courier New", ui-monospace, monospace`;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.fillText("DVD", ball.x + ball.w / 2, ball.y + ball.h / 2 + 1);
+    // Anchor offset by the measured ink bounds, not the box center, so the
+    // drawn glyphs land exactly on the ball's collision rect (see
+    // measureWordmark).
+    ctx.fillText(WORDMARK_TEXT, ball.x + wordmark.offsetX, ball.y + wordmark.offsetY);
 
     ctx.fillStyle = "#e6e6f0";
     ctx.fillRect(paddle.x, paddle.y, paddle.w, paddle.h);

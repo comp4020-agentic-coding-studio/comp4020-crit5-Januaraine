@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  BALL_SIZE,
+  BALL_HEIGHT,
+  BALL_WIDTH,
   createInitialPaddle,
   movePaddle,
   stepBall,
@@ -8,14 +9,14 @@ import {
   type Bounds,
 } from "../src/scripts/dvd-game";
 
-const bounds: Bounds = { w: 480, h: 320 };
+const bounds: Bounds = { w: 720, h: 480 };
 
 function makeBall(overrides: Partial<Ball> = {}): Ball {
   return {
     x: 200,
     y: 100,
-    w: BALL_SIZE,
-    h: BALL_SIZE,
+    w: BALL_WIDTH,
+    h: BALL_HEIGHT,
     vx: 100,
     vy: 100,
     color: "#39ff88",
@@ -34,7 +35,7 @@ describe("stepBall: walls", () => {
 
   it("reflects vx off the right wall", () => {
     const paddle = createInitialPaddle(bounds);
-    const ball = makeBall({ x: bounds.w - BALL_SIZE - 2, vx: 100 });
+    const ball = makeBall({ x: bounds.w - BALL_WIDTH - 2, vx: 100 });
     const result = stepBall(ball, paddle, bounds, 0.1);
     expect(result.ball.vx).toBeLessThan(0);
     expect(result.wallHit).toBe(true);
@@ -60,7 +61,7 @@ describe("stepBall: walls", () => {
 describe("stepBall: paddle band", () => {
   it("bounces off the paddle when overlapping it while descending", () => {
     const paddle = createInitialPaddle(bounds);
-    const ball = makeBall({ x: paddle.x + paddle.w / 2 - BALL_SIZE / 2, y: paddle.y - 5, vy: 100 });
+    const ball = makeBall({ x: paddle.x + paddle.w / 2 - BALL_WIDTH / 2, y: paddle.y - 5, vy: 100 });
     const result = stepBall(ball, paddle, bounds, 0.1);
     expect(result.bounced).toBe(true);
     expect(result.ball.vy).toBeLessThan(0);

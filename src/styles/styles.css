@@ -21,7 +21,7 @@ body {
 }
 
 main {
-  max-width: 40rem;
+  max-width: 56rem;
   margin: 0 auto;
   text-align: center;
 }
@@ -36,23 +36,10 @@ h1 {
   font-size: 1.5rem;
 }
 
-.instructions {
-  font-size: 0.95rem;
-  color: var(--muted);
-}
-
-kbd {
-  background: var(--panel);
-  border: 1px solid #3a3a52;
-  border-radius: 2px;
-  padding: 0 0.35em;
-  font-family: inherit;
-}
-
 .game-wrapper {
   position: relative;
   width: 100%;
-  max-width: 30rem;
+  max-width: 52rem;
   aspect-ratio: 3 / 2;
   margin: 1.5rem auto 0;
   border: 4px solid var(--panel);
