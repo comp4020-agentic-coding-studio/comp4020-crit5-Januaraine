@@ -8,6 +8,7 @@ import {
   catchTriggersSpeedBoost,
   createInitialPaddle,
   createInputState,
+  createScoreState,
   createSmallBalls,
   deactivateSpeedBoost,
   INITIAL_SPEED_BOOST_STATE,
@@ -17,6 +18,9 @@ import {
   MIN_VERTICAL_RATIO,
   movePaddle,
   pushTrailEntry,
+  recordCatch,
+  recordWin,
+  resetCatches,
   resolveBallCollisions,
   resolvePaddleDelta,
   setInputKey,
@@ -720,5 +724,123 @@ describe("speed-boost visual feedback: existing boost behaviour is unchanged", (
     const outgoingSpeed = Math.hypot(result.ball.vx, result.ball.vy);
     expect(outgoingSpeed).toBeGreaterThanOrEqual(MIN_SPEED - 1e-6);
     expect(outgoingSpeed).toBeLessThanOrEqual(MAX_SPEED + 1e-6);
+  });
+});
+
+describe("Normal Mode score: catches + session-only best", () => {
+  it("best starts empty (null) on a fresh score state", () => {
+    const score = createScoreState();
+    expect(score.catches).toBe(0);
+    expect(score.best).toBeNull();
+  });
+
+  it("a paddle collision (bounced) increments catches by exactly 1", () => {
+    const paddle = createInitialPaddle(bounds);
+    const ball = makeBall({ x: paddle.x + paddle.w / 2 - BALL_WIDTH / 2, y: paddle.y - 5, vy: 100 });
+    const result = stepBall(ball, paddle, bounds, 0.1);
+    expect(result.bounced).toBe(true);
+
+    const before = createScoreState();
+    const after = recordCatch(before, result.bounced);
+    expect(after.catches).toBe(1);
+  });
+
+  it("a wall collision alone does not increment catches", () => {
+    const paddle = createInitialPaddle(bounds);
+    const result = stepBall(makeBall({ x: 2, vx: -100 }), paddle, bounds, 0.1);
+    expect(result.wallHit).toBe(true);
+    expect(result.bounced).toBe(false);
+
+    const score = recordCatch(createScoreState(), result.bounced);
+    expect(score.catches).toBe(0);
+  });
+
+  it("a corner collision does not increment catches by itself", () => {
+    const paddle = createInitialPaddle(bounds);
+    const result = stepBall(makeBall({ x: 1, y: 1, vx: -100, vy: -100 }), paddle, bounds, 0.1);
+    expect(result.cornerHit).toBe(true);
+    expect(result.win).toBe(true);
+    expect(result.bounced).toBe(false);
+
+    const score = recordCatch(createScoreState(), result.bounced);
+    expect(score.catches).toBe(0);
+  });
+
+  it("missing the paddle (game over) does not increment catches", () => {
+    const paddle = createInitialPaddle(bounds);
+    const ball = makeBall({ x: 0, y: paddle.y + paddle.h + 1, vy: 100 });
+    const result = stepBall(ball, paddle, bounds, 0.1);
+    expect(result.gameOver).toBe(true);
+    expect(result.bounced).toBe(false);
+
+    const score = recordCatch(createScoreState(), result.bounced);
+    expect(score.catches).toBe(0);
+  });
+
+  it("pausing does not change catches: a frozen step never reports bounced, so the count can't move", () => {
+    const paddle = createInitialPaddle(bounds);
+    // A ball positioned to catch on the paddle if it were allowed to step.
+    const ball = makeBall({ x: paddle.x + paddle.w / 2 - BALL_WIDTH / 2, y: paddle.y - 5, vy: 100 });
+    const result = stepGame(ball, paddle, bounds, 0.1, true);
+    expect(result.bounced).toBe(false);
+
+    let score = createScoreState();
+    score = recordCatch(score, true); // simulate a prior catch this run
+    const before = score.catches;
+    score = recordCatch(score, result.bounced);
+    expect(score.catches).toBe(before);
+  });
+
+  it("restart resets catches to 0", () => {
+    let score = createScoreState();
+    score = recordCatch(score, true);
+    score = recordCatch(score, true);
+    expect(score.catches).toBe(2);
+
+    score = resetCatches(score);
+    expect(score.catches).toBe(0);
+  });
+
+  it("restart does not reset the session best", () => {
+    let score = createScoreState();
+    score = recordCatch(score, true);
+    score = recordCatch(score, true);
+    score = recordWin(score); // best becomes 2
+
+    score = resetCatches(score);
+    expect(score.best).toBe(2);
+    expect(score.catches).toBe(0);
+  });
+
+  it("a winning game updates best when its catch count is lower", () => {
+    let score = createScoreState();
+    for (let i = 0; i < 12; i++) score = recordCatch(score, true);
+    score = recordWin(score);
+    expect(score.best).toBe(12);
+
+    score = resetCatches(score);
+    for (let i = 0; i < 9; i++) score = recordCatch(score, true);
+    score = recordWin(score);
+    expect(score.best).toBe(9);
+  });
+
+  it("a winning game does not update best when its catch count is higher", () => {
+    let score = createScoreState();
+    for (let i = 0; i < 9; i++) score = recordCatch(score, true);
+    score = recordWin(score);
+    expect(score.best).toBe(9);
+
+    score = resetCatches(score);
+    for (let i = 0; i < 14; i++) score = recordCatch(score, true);
+    score = recordWin(score);
+    expect(score.best).toBe(9);
+  });
+
+  it("game over does not update best", () => {
+    let score = createScoreState();
+    for (let i = 0; i < 11; i++) score = recordCatch(score, true);
+    // No recordWin call on game over.
+    expect(score.best).toBeNull();
+    expect(score.catches).toBe(11);
   });
 });

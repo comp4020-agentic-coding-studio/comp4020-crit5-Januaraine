@@ -39,10 +39,14 @@ import "../styles/styles.css";
         ></canvas>
         <div id="game-over" class="game-over" hidden>
           <p>Game Over</p>
+          <p class="score-line">CATCHES: <span id="game-over-catches">0</span></p>
+          <p class="score-line">BEST: <span id="game-over-best">—</span></p>
           <button id="restart" type="button">Restart</button>
         </div>
         <div id="game-win" class="game-over game-win" hidden>
           <p>You Win!</p>
+          <p class="score-line">CATCHES: <span id="game-win-catches">0</span></p>
+          <p class="score-line">BEST: <span id="game-win-best">—</span></p>
           <button id="restart-win" type="button">Play Again</button>
         </div>
         <div id="game-paused" class="game-over game-paused" hidden>

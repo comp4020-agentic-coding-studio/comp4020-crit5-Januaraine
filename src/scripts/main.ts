@@ -8,10 +8,14 @@ import {
   createInitialPaddle,
   createInputState,
   createSmallBalls,
+  createScoreState,
   deactivateSpeedBoost,
   INITIAL_SPEED_BOOST_STATE,
   movePaddle,
   pushTrailEntry,
+  recordCatch,
+  recordWin,
+  resetCatches,
   resolvePaddleDelta,
   setInputKey,
   setInputPointer,
@@ -26,6 +30,7 @@ import {
   type Ball,
   type InputState,
   type Paddle,
+  type ScoreState,
   type SpeedBoostState,
   type TrailEntry,
 } from "./dvd-game";
@@ -74,6 +79,10 @@ function initGame(
   winOverlay: HTMLDivElement,
   restartWinButton: HTMLButtonElement,
   pauseOverlay: HTMLDivElement,
+  gameOverCatchesEl: HTMLElement,
+  gameOverBestEl: HTMLElement,
+  winCatchesEl: HTMLElement,
+  winBestEl: HTMLElement,
 ): void {
   ctx.imageSmoothingEnabled = false;
 
@@ -101,7 +110,11 @@ function initGame(
   let balls: Ball[] = [{ ...createInitialBall(bounds, wordmark), id: nextBallId++ }];
   let paddle: Paddle = createInitialPaddle(bounds);
   let colorIndex = 0;
-  let catchCount = 0;
+  // Deliberately declared outside reset() (only its `catches` field is
+  // zeroed there): `best` is Normal Mode's session-only record and must
+  // survive a restart, living purely in this variable so a page refresh
+  // (not just a restart) is what clears it.
+  let score: ScoreState = createScoreState();
   let collisionCount = 0;
   let speedBoost: SpeedBoostState = INITIAL_SPEED_BOOST_STATE;
   // Pause-aware clock (only advances while !paused) that SpeedBoostState and
@@ -129,7 +142,7 @@ function initGame(
     balls = [{ ...createInitialBall(bounds, wordmark), id: nextBallId++ }];
     paddle = createInitialPaddle(bounds);
     colorIndex = 0;
-    catchCount = 0;
+    score = resetCatches(score);
     collisionCount = 0;
     speedBoost = INITIAL_SPEED_BOOST_STATE;
     gameTime = 0;
@@ -201,6 +214,18 @@ function initGame(
     ctx.restore();
   }
 
+  /** Always-visible "CATCHES: n" / "BEST: n" (or "—" before any win this session) readout, top-left. */
+  function drawScoreHud(current: ScoreState): void {
+    ctx.save();
+    ctx.font = `bold 16px "Courier New", ui-monospace, monospace`;
+    ctx.textAlign = "left";
+    ctx.textBaseline = "top";
+    ctx.fillStyle = "#e6e6f0";
+    ctx.fillText(`CATCHES: ${current.catches}`, 10, 10);
+    ctx.fillText(`BEST: ${current.best === null ? "—" : current.best}`, 10, 30);
+    ctx.restore();
+  }
+
   function draw(time: number): void {
     const flashing = time < flashUntil;
     ctx.fillStyle = flashing ? "#ffffff" : "#000000";
@@ -212,6 +237,7 @@ function initGame(
     ctx.fillStyle = "#e6e6f0";
     ctx.fillRect(paddle.x, paddle.y, paddle.w, paddle.h);
 
+    drawScoreHud(score);
     drawSpeedBoostHud(speedBoostRemainingMs(speedBoost, gameTime));
   }
 
@@ -255,9 +281,10 @@ function initGame(
       }
     }
 
+    score = recordCatch(score, main.bounced);
+
     if (main.bounced) {
-      catchCount += 1;
-      if (catchTriggersSpeedBoost(catchCount)) {
+      if (catchTriggersSpeedBoost(score.catches)) {
         // Boosts every logo currently in play, main and small alike, so the
         // whole swarm speeds up together rather than just the main logo.
         if (!speedBoost.active) {
@@ -305,12 +332,17 @@ function initGame(
 
     if (main.gameOver) {
       running = false;
+      gameOverCatchesEl.textContent = String(score.catches);
+      gameOverBestEl.textContent = score.best === null ? "—" : String(score.best);
       overlay.hidden = false;
       return;
     }
 
     if (main.win) {
       running = false;
+      score = recordWin(score);
+      winCatchesEl.textContent = String(score.catches);
+      winBestEl.textContent = score.best === null ? "—" : String(score.best);
       winOverlay.hidden = false;
       return;
     }
@@ -371,8 +403,36 @@ const restartButton = document.querySelector<HTMLButtonElement>("#restart");
 const winOverlay = document.querySelector<HTMLDivElement>("#game-win");
 const restartWinButton = document.querySelector<HTMLButtonElement>("#restart-win");
 const pauseOverlay = document.querySelector<HTMLDivElement>("#game-paused");
+const gameOverCatchesEl = document.querySelector<HTMLElement>("#game-over-catches");
+const gameOverBestEl = document.querySelector<HTMLElement>("#game-over-best");
+const winCatchesEl = document.querySelector<HTMLElement>("#game-win-catches");
+const winBestEl = document.querySelector<HTMLElement>("#game-win-best");
 
-if (canvas && overlay && restartButton && winOverlay && restartWinButton && pauseOverlay) {
+if (
+  canvas &&
+  overlay &&
+  restartButton &&
+  winOverlay &&
+  restartWinButton &&
+  pauseOverlay &&
+  gameOverCatchesEl &&
+  gameOverBestEl &&
+  winCatchesEl &&
+  winBestEl
+) {
   const ctx = canvas.getContext("2d");
-  if (ctx) initGame(canvas, ctx, overlay, restartButton, winOverlay, restartWinButton, pauseOverlay);
+  if (ctx)
+    initGame(
+      canvas,
+      ctx,
+      overlay,
+      restartButton,
+      winOverlay,
+      restartWinButton,
+      pauseOverlay,
+      gameOverCatchesEl,
+      gameOverBestEl,
+      winCatchesEl,
+      winBestEl,
+    );
 }

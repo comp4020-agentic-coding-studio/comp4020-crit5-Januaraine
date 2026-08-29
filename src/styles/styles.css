@@ -85,6 +85,13 @@ h1 {
   color: var(--fg);
 }
 
+.score-line {
+  margin: 0;
+  font-size: 1rem;
+  letter-spacing: 0.1em;
+  color: var(--fg);
+}
+
 .game-over button {
   font-family: inherit;
   font-size: 1rem;

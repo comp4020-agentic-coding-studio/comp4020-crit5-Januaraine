@@ -563,3 +563,36 @@ export function resolvePaddleDelta(
   }
   return 0;
 }
+
+/**
+ * Normal Mode's score: `catches` counts every paddle bounce of the main
+ * logo so far this run (reset to 0 on restart); `best` is the fewest
+ * catches any win this page session has needed, or null before the first
+ * win. `best` lives only in this in-memory object — nothing here ever
+ * reads from or writes to any storage — so a page refresh naturally
+ * clears it back to null.
+ */
+export interface ScoreState {
+  catches: number;
+  best: number | null;
+}
+
+export function createScoreState(): ScoreState {
+  return { catches: 0, best: null };
+}
+
+/** +1 catch on a paddle bounce; a no-op for any other step outcome (wall hit, corner hit alone, game over, or a paused/frozen step). */
+export function recordCatch(score: ScoreState, bounced: boolean): ScoreState {
+  return bounced ? { ...score, catches: score.catches + 1 } : score;
+}
+
+/** Starting a new game/restart: zero this run's catch count, leaving the session best untouched. */
+export function resetCatches(score: ScoreState): ScoreState {
+  return { ...score, catches: 0 };
+}
+
+/** On a win, the session best becomes the lower of its current value (if any) and this run's catch count. */
+export function recordWin(score: ScoreState): ScoreState {
+  const best = score.best === null ? score.catches : Math.min(score.best, score.catches);
+  return { ...score, best };
+}
