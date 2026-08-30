@@ -12,6 +12,7 @@ import {
   createScoreState,
   createSmallBalls,
   deactivateSpeedBoost,
+  DEFAULT_GAME_MODE,
   INITIAL_SPEED_BOOST_STATE,
   MAX_BOUNCE_ANGLE,
   MAX_SPEED,
@@ -20,8 +21,10 @@ import {
   movePaddle,
   pushTrailEntry,
   recordCatch,
+  recordCornerHit,
   recordWin,
   resetCatches,
+  resetCorners,
   resolveBallCollisions,
   resolvePaddleDelta,
   setInputKey,
@@ -1175,5 +1178,90 @@ describe("Normal Mode score: catches + session-only best", () => {
     // No recordWin call on game over.
     expect(score.best).toBeNull();
     expect(score.catches).toBe(11);
+  });
+});
+
+describe("Endless Mode score: corners + session-only best corners", () => {
+  it("defaults to Normal Mode", () => {
+    expect(DEFAULT_GAME_MODE).toBe("normal");
+  });
+
+  it("corners and bestCorners start at 0/null on a fresh score state", () => {
+    const score = createScoreState();
+    expect(score.corners).toBe(0);
+    expect(score.bestCorners).toBeNull();
+  });
+
+  it("recordCornerHit increments corners by exactly 1 per call", () => {
+    let score = createScoreState();
+    score = recordCornerHit(score);
+    expect(score.corners).toBe(1);
+    score = recordCornerHit(score);
+    expect(score.corners).toBe(2);
+  });
+
+  it("recordCornerHit does not touch catches or the Normal Mode best", () => {
+    let score = createScoreState();
+    score = recordCatch(score, true);
+    score = recordCornerHit(score);
+    expect(score.catches).toBe(1);
+    expect(score.best).toBeNull();
+  });
+
+  it("bestCorners tracks the highest corners tally reached so far, live, within a single run", () => {
+    let score = createScoreState();
+    score = recordCornerHit(score); // corners=1
+    expect(score.bestCorners).toBe(1);
+    score = recordCornerHit(score); // corners=2
+    expect(score.bestCorners).toBe(2);
+  });
+
+  it("resetCorners zeroes corners for a new run while leaving bestCorners untouched", () => {
+    let score = createScoreState();
+    score = recordCornerHit(score);
+    score = recordCornerHit(score);
+    score = recordCornerHit(score); // corners=3, bestCorners=3
+
+    score = resetCorners(score);
+    expect(score.corners).toBe(0);
+    expect(score.bestCorners).toBe(3);
+  });
+
+  it("a shorter run afterwards does not lower bestCorners: a game-over run should still update best only when it's higher", () => {
+    let score = createScoreState();
+    for (let i = 0; i < 5; i++) score = recordCornerHit(score); // best becomes 5
+
+    score = resetCorners(score);
+    for (let i = 0; i < 2; i++) score = recordCornerHit(score); // this run only reaches 2
+    expect(score.corners).toBe(2);
+    expect(score.bestCorners).toBe(5);
+  });
+
+  it("a longer run afterwards raises bestCorners: game over on a new high tally still updates best", () => {
+    let score = createScoreState();
+    for (let i = 0; i < 3; i++) score = recordCornerHit(score); // best becomes 3
+
+    score = resetCorners(score);
+    for (let i = 0; i < 7; i++) score = recordCornerHit(score); // this run reaches 7
+    expect(score.corners).toBe(7);
+    expect(score.bestCorners).toBe(7);
+  });
+
+  it("Endless Mode reuses the same difficulty-gated corner detection as Normal Mode's win condition", () => {
+    const paddle = createInitialPaddle(bounds);
+    const tolerance = cornerWinTolerance(bounds);
+    const nearCornerBall = makeBall({ x: tolerance - 5, y: tolerance - 10, vx: 0, vy: 0 });
+
+    // Easy: the relaxed win-zone tolerance still flags a corner (`win`).
+    const easyResult = stepBall(nearCornerBall, paddle, bounds, 0.1, "easy");
+    expect(easyResult.win).toBe(true);
+
+    // Hard: only an actual corner touch flags it.
+    const hardResult = stepBall(nearCornerBall, paddle, bounds, 0.1, "hard");
+    expect(hardResult.win).toBe(false);
+
+    const hardCornerBall = makeBall({ x: 1, y: 1, vx: -100, vy: -100 });
+    const hardCornerResult = stepBall(hardCornerBall, paddle, bounds, 0.1, "hard");
+    expect(hardCornerResult.win).toBe(true);
   });
 });

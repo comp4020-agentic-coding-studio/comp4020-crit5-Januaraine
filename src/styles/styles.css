@@ -101,6 +101,35 @@ a {
   gap: 1rem;
 }
 
+.select-group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.select-label {
+  margin: 0;
+  font-size: 0.85rem;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+}
+
+.mode-buttons button[aria-pressed="true"] {
+  background: var(--accent);
+  color: var(--bg);
+}
+
+.mode-buttons button[aria-pressed="false"] {
+  background: transparent;
+  color: var(--fg);
+  border: 1px solid var(--muted);
+}
+
+.start-button {
+  margin-top: 0.5rem;
+}
+
 .pause-buttons {
   display: flex;
   flex-direction: column;

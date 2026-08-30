@@ -119,6 +119,17 @@ function isInCornerWinZone(x: number, y: number, w: number, bounds: Bounds): boo
 export type Difficulty = "easy" | "hard";
 export const DEFAULT_DIFFICULTY: Difficulty = "easy";
 
+/**
+ * Normal Mode ends the run the moment the logo reaches a corner (see `win`
+ * above). Endless Mode reuses that exact same corner detection but treats it
+ * as a scoring event instead of an end condition — the run only ends when the
+ * logo is missed (gameOver). Difficulty (Easy/Hard) still governs corner
+ * detection identically in both modes; game mode only changes what happens
+ * once a corner is reached.
+ */
+export type GameMode = "normal" | "endless";
+export const DEFAULT_GAME_MODE: GameMode = "normal";
+
 export function createInitialBall(bounds: Bounds, size?: { w: number; h: number }): Ball {
   const w = size?.w ?? BALL_WIDTH;
   const h = size?.h ?? BALL_HEIGHT;
@@ -609,20 +620,26 @@ export function resolvePaddleDelta(
 }
 
 /**
- * Normal Mode's score: `catches` counts every paddle bounce of the main
- * logo so far this run (reset to 0 on restart); `best` is the fewest
- * catches any win this page session has needed, or null before the first
- * win. `best` lives only in this in-memory object — nothing here ever
- * reads from or writes to any storage — so a page refresh naturally
- * clears it back to null.
+ * `catches` (Normal and Endless alike) counts every paddle bounce of the main
+ * logo so far this run, reset to 0 on restart; `best` is Normal Mode's
+ * record — the fewest catches any win this page session has needed, or null
+ * before the first win. `corners`/`bestCorners` are Endless Mode's
+ * equivalents: `corners` counts corner hits so far this run, and
+ * `bestCorners` is the highest `corners` tally any Endless run this session
+ * has reached (updated live, so it's already correct the moment a run ends
+ * in game-over). Every field here lives only in this in-memory object —
+ * nothing here ever reads from or writes to any storage — so a page refresh
+ * naturally clears them all back to their initial values.
  */
 export interface ScoreState {
   catches: number;
   best: number | null;
+  corners: number;
+  bestCorners: number | null;
 }
 
 export function createScoreState(): ScoreState {
-  return { catches: 0, best: null };
+  return { catches: 0, best: null, corners: 0, bestCorners: null };
 }
 
 /** +1 catch on a paddle bounce; a no-op for any other step outcome (wall hit, corner hit alone, game over, or a paused/frozen step). */
@@ -639,4 +656,22 @@ export function resetCatches(score: ScoreState): ScoreState {
 export function recordWin(score: ScoreState): ScoreState {
   const best = score.best === null ? score.catches : Math.min(score.best, score.catches);
   return { ...score, best };
+}
+
+/**
+ * Endless Mode: +1 corner on a corner-hit (the same difficulty-gated `win`
+ * condition stepBall already reports — Endless Mode just doesn't end the run
+ * on it). Updates the session-best corner tally in the same step whenever
+ * this run's new count is the highest yet, so `bestCorners` is already
+ * correct the instant a run later ends in game-over.
+ */
+export function recordCornerHit(score: ScoreState): ScoreState {
+  const corners = score.corners + 1;
+  const bestCorners = score.bestCorners === null ? corners : Math.max(score.bestCorners, corners);
+  return { ...score, corners, bestCorners };
+}
+
+/** Starting a new Endless run: zero this run's corner count, leaving the session-best corner tally untouched. */
+export function resetCorners(score: ScoreState): ScoreState {
+  return { ...score, corners: 0 };
 }

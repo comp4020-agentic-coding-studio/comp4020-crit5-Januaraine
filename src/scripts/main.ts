@@ -11,13 +11,16 @@ import {
   createScoreState,
   deactivateSpeedBoost,
   DEFAULT_DIFFICULTY,
+  DEFAULT_GAME_MODE,
   INITIAL_SPEED_BOOST_STATE,
   movePaddle,
   PADDLE_MARGIN_BOTTOM,
   pushTrailEntry,
   recordCatch,
+  recordCornerHit,
   recordWin,
   resetCatches,
+  resetCorners,
   resolvePaddleDelta,
   setInputKey,
   setInputPointer,
@@ -31,6 +34,7 @@ import {
   wallHitTriggersSpawn,
   type Ball,
   type Difficulty,
+  type GameMode,
   type InputState,
   type Paddle,
   type ScoreState,
@@ -84,15 +88,21 @@ function initGame(
   pauseOverlay: HTMLDivElement,
   gameOverCatchesEl: HTMLElement,
   gameOverBestEl: HTMLElement,
+  gameOverCornersLine: HTMLElement,
+  gameOverCornersEl: HTMLElement,
   winCatchesEl: HTMLElement,
   winBestEl: HTMLElement,
   modeSelectOverlay: HTMLDivElement,
-  easyModeButton: HTMLButtonElement,
-  hardModeButton: HTMLButtonElement,
+  selectNormalButton: HTMLButtonElement,
+  selectEndlessButton: HTMLButtonElement,
+  selectEasyButton: HTMLButtonElement,
+  selectHardButton: HTMLButtonElement,
+  startGameButton: HTMLButtonElement,
   pauseContinueButton: HTMLButtonElement,
   pauseRestartButton: HTMLButtonElement,
   pauseChangeModeButton: HTMLButtonElement,
   winChangeModeButton: HTMLButtonElement,
+  gameOverChangeModeButton: HTMLButtonElement,
 ): void {
   ctx.imageSmoothingEnabled = false;
 
@@ -153,6 +163,16 @@ function initGame(
   // purely as a placeholder before the player has chosen; it can't affect
   // gameplay because the loop never runs until modeChosen is true.
   let difficulty: Difficulty = DEFAULT_DIFFICULTY;
+  // Whether corners end the run (Normal) or just score a point (Endless) —
+  // chosen alongside `difficulty` on the mode-select screen and carried
+  // through every restart, exactly like difficulty above.
+  let gameMode: GameMode = DEFAULT_GAME_MODE;
+  // The mode-select screen's own pending picks, tracked separately from
+  // `gameMode`/`difficulty` so toggling Normal/Endless or Easy/Hard before
+  // pressing Start never touches a game that's still in progress behind it.
+  // Start() is what commits these into `gameMode`/`difficulty`.
+  let pendingGameMode: GameMode = DEFAULT_GAME_MODE;
+  let pendingDifficulty: Difficulty = DEFAULT_DIFFICULTY;
   let modeChosen = false;
   // Tracks the single in-flight requestAnimationFrame callback. The loop
   // keeps re-scheduling itself every frame even while paused (so `lastTime`
@@ -226,6 +246,7 @@ function initGame(
     paddle = createInitialPaddle(bounds);
     colorIndex = 0;
     score = resetCatches(score);
+    score = resetCorners(score);
     collisionCount = 0;
     speedBoost = INITIAL_SPEED_BOOST_STATE;
     gameTime = 0;
@@ -242,12 +263,31 @@ function initGame(
     scheduleLoop();
   }
 
-  /** Locks in the chosen difficulty for this play session and starts the first game. Only the mode-select screen calls this — restarts reuse the same difficulty via reset(). */
-  function startGame(mode: Difficulty): void {
-    difficulty = mode;
+  /**
+   * Locks in the chosen game mode and difficulty for this play session and
+   * starts the first game. Only the mode-select screen's Start button calls
+   * this — restarts reuse the same mode/difficulty via reset().
+   */
+  function startGame(mode: GameMode, selectedDifficulty: Difficulty): void {
+    gameMode = mode;
+    difficulty = selectedDifficulty;
     modeChosen = true;
     modeSelectOverlay.hidden = true;
     reset();
+  }
+
+  /** Reflects the mode-select screen's pending Game Mode pick in both toggle buttons' aria-pressed state. */
+  function selectGameMode(mode: GameMode): void {
+    pendingGameMode = mode;
+    selectNormalButton.setAttribute("aria-pressed", String(mode === "normal"));
+    selectEndlessButton.setAttribute("aria-pressed", String(mode === "endless"));
+  }
+
+  /** Reflects the mode-select screen's pending Difficulty pick in both toggle buttons' aria-pressed state. */
+  function selectDifficulty(mode: Difficulty): void {
+    pendingDifficulty = mode;
+    selectEasyButton.setAttribute("aria-pressed", String(mode === "easy"));
+    selectHardButton.setAttribute("aria-pressed", String(mode === "hard"));
   }
 
   /**
@@ -316,7 +356,7 @@ function initGame(
     }
   }
 
-  /** "SPEED UP n.n" countdown, purely reflecting speedBoostRemainingMs — hidden once the boost isn't active. Sits below the difficulty label so the two never overlap. */
+  /** "SPEED UP n.n" countdown, purely reflecting speedBoostRemainingMs — hidden once the boost isn't active. Sits below the mode/difficulty labels so none of them ever overlap. */
   function drawSpeedBoostHud(remainingMs: number): void {
     if (remainingMs <= 0) return;
     ctx.save();
@@ -324,35 +364,48 @@ function initGame(
     ctx.textAlign = "right";
     ctx.textBaseline = "top";
     ctx.fillStyle = BOOST_HUD_COLOR;
-    ctx.fillText(`SPEED UP ${(remainingMs / 1000).toFixed(1)}`, bounds.w - 10, 30);
+    ctx.fillText(`SPEED UP ${(remainingMs / 1000).toFixed(1)}`, bounds.w - 10, 50);
     ctx.restore();
   }
 
   /**
-   * Unobtrusive "EASY" / "HARD" readout, top-right — the only in-game
-   * indication of which corner-win rule is active. No rules text, just the
-   * mode name, and it stays drawn on the canvas (so it's still visible,
-   * dimmed, once a win/game-over overlay covers the canvas).
+   * Unobtrusive "NORMAL"/"ENDLESS" over "EASY"/"HARD" readout, top-right —
+   * the only in-game indication of which game mode and corner-win rule are
+   * active. No rules text, just the two names, and it stays drawn on the
+   * canvas (so it's still visible, dimmed, once a win/game-over overlay
+   * covers the canvas).
    */
-  function drawDifficultyHud(mode: Difficulty): void {
+  function drawModeHud(mode: GameMode, selectedDifficulty: Difficulty): void {
     ctx.save();
     ctx.font = `bold 16px "Courier New", ui-monospace, monospace`;
     ctx.textAlign = "right";
     ctx.textBaseline = "top";
     ctx.fillStyle = "#e6e6f0";
     ctx.fillText(mode.toUpperCase(), bounds.w - 10, 10);
+    ctx.fillText(selectedDifficulty.toUpperCase(), bounds.w - 10, 30);
     ctx.restore();
   }
 
-  /** Always-visible "CATCHES: n" / "BEST: n" (or "—" before any win this session) readout, top-left. */
-  function drawScoreHud(current: ScoreState): void {
+  /**
+   * Always-visible top-left readout: "CATCHES: n" in both modes, plus
+   * "CORNERS: n" in Endless Mode only, then "BEST: n" (or "—" before any
+   * record this session) — BEST reflects the session's fewest-catches win in
+   * Normal Mode, or its highest corner tally in Endless Mode.
+   */
+  function drawScoreHud(current: ScoreState, mode: GameMode): void {
     ctx.save();
     ctx.font = `bold 16px "Courier New", ui-monospace, monospace`;
     ctx.textAlign = "left";
     ctx.textBaseline = "top";
     ctx.fillStyle = "#e6e6f0";
     ctx.fillText(`CATCHES: ${current.catches}`, 10, 10);
-    ctx.fillText(`BEST: ${current.best === null ? "—" : current.best}`, 10, 30);
+    let nextLineY = 30;
+    if (mode === "endless") {
+      ctx.fillText(`CORNERS: ${current.corners}`, 10, nextLineY);
+      nextLineY += 20;
+    }
+    const best = mode === "endless" ? current.bestCorners : current.best;
+    ctx.fillText(`BEST: ${best === null ? "—" : best}`, 10, nextLineY);
     ctx.restore();
   }
 
@@ -367,8 +420,8 @@ function initGame(
     ctx.fillStyle = "#e6e6f0";
     ctx.fillRect(paddle.x, paddle.y, paddle.w, paddle.h);
 
-    drawScoreHud(score);
-    if (modeChosen) drawDifficultyHud(difficulty);
+    drawScoreHud(score, gameMode);
+    if (modeChosen) drawModeHud(gameMode, difficulty);
     drawSpeedBoostHud(speedBoostRemainingMs(speedBoost, gameTime));
   }
 
@@ -416,6 +469,14 @@ function initGame(
     }
 
     score = recordCatch(score, main.bounced);
+
+    // Endless Mode reuses the exact same difficulty-gated corner detection
+    // (main.win) as Normal Mode, but treats it as a scoring event instead of
+    // an end condition — score the corner here, then let the run continue;
+    // the win-ending branch below only fires outside Endless Mode.
+    if (main.win && gameMode === "endless") {
+      score = recordCornerHit(score);
+    }
 
     if (main.bounced) {
       if (catchTriggersSpeedBoost(score.catches)) {
@@ -467,12 +528,20 @@ function initGame(
     if (main.gameOver) {
       running = false;
       gameOverCatchesEl.textContent = String(score.catches);
-      gameOverBestEl.textContent = score.best === null ? "—" : String(score.best);
+      gameOverCornersLine.hidden = gameMode !== "endless";
+      if (gameMode === "endless") {
+        gameOverCornersEl.textContent = String(score.corners);
+        gameOverBestEl.textContent = score.bestCorners === null ? "—" : String(score.bestCorners);
+      } else {
+        gameOverBestEl.textContent = score.best === null ? "—" : String(score.best);
+      }
       overlay.hidden = false;
       return;
     }
 
-    if (main.win) {
+    // Endless Mode never wins outright (see the recordCornerHit call above) —
+    // only Normal Mode's corner hit ends the run here.
+    if (main.win && gameMode !== "endless") {
       running = false;
       score = recordWin(score);
       winCatchesEl.textContent = String(score.catches);
@@ -529,12 +598,16 @@ function initGame(
 
   restartButton.addEventListener("click", reset);
   restartWinButton.addEventListener("click", reset);
-  easyModeButton.addEventListener("click", () => startGame("easy"));
-  hardModeButton.addEventListener("click", () => startGame("hard"));
+  selectNormalButton.addEventListener("click", () => selectGameMode("normal"));
+  selectEndlessButton.addEventListener("click", () => selectGameMode("endless"));
+  selectEasyButton.addEventListener("click", () => selectDifficulty("easy"));
+  selectHardButton.addEventListener("click", () => selectDifficulty("hard"));
+  startGameButton.addEventListener("click", () => startGame(pendingGameMode, pendingDifficulty));
   pauseContinueButton.addEventListener("click", togglePauseState);
   pauseRestartButton.addEventListener("click", reset);
   pauseChangeModeButton.addEventListener("click", goToModeSelect);
   winChangeModeButton.addEventListener("click", goToModeSelect);
+  gameOverChangeModeButton.addEventListener("click", goToModeSelect);
 
   // Static initial frame behind the mode-select overlay; the loop itself
   // only starts once a mode is chosen (see startGame -> reset).
@@ -549,15 +622,21 @@ const restartWinButton = document.querySelector<HTMLButtonElement>("#restart-win
 const pauseOverlay = document.querySelector<HTMLDivElement>("#game-paused");
 const gameOverCatchesEl = document.querySelector<HTMLElement>("#game-over-catches");
 const gameOverBestEl = document.querySelector<HTMLElement>("#game-over-best");
+const gameOverCornersLine = document.querySelector<HTMLElement>("#game-over-corners-line");
+const gameOverCornersEl = document.querySelector<HTMLElement>("#game-over-corners");
 const winCatchesEl = document.querySelector<HTMLElement>("#game-win-catches");
 const winBestEl = document.querySelector<HTMLElement>("#game-win-best");
 const modeSelectOverlay = document.querySelector<HTMLDivElement>("#mode-select");
-const easyModeButton = document.querySelector<HTMLButtonElement>("#mode-easy");
-const hardModeButton = document.querySelector<HTMLButtonElement>("#mode-hard");
+const selectNormalButton = document.querySelector<HTMLButtonElement>("#select-normal");
+const selectEndlessButton = document.querySelector<HTMLButtonElement>("#select-endless");
+const selectEasyButton = document.querySelector<HTMLButtonElement>("#select-easy");
+const selectHardButton = document.querySelector<HTMLButtonElement>("#select-hard");
+const startGameButton = document.querySelector<HTMLButtonElement>("#start-game");
 const pauseContinueButton = document.querySelector<HTMLButtonElement>("#pause-continue");
 const pauseRestartButton = document.querySelector<HTMLButtonElement>("#pause-restart");
 const pauseChangeModeButton = document.querySelector<HTMLButtonElement>("#pause-change-mode");
 const winChangeModeButton = document.querySelector<HTMLButtonElement>("#win-change-mode");
+const gameOverChangeModeButton = document.querySelector<HTMLButtonElement>("#game-over-change-mode");
 
 if (
   canvas &&
@@ -568,15 +647,21 @@ if (
   pauseOverlay &&
   gameOverCatchesEl &&
   gameOverBestEl &&
+  gameOverCornersLine &&
+  gameOverCornersEl &&
   winCatchesEl &&
   winBestEl &&
   modeSelectOverlay &&
-  easyModeButton &&
-  hardModeButton &&
+  selectNormalButton &&
+  selectEndlessButton &&
+  selectEasyButton &&
+  selectHardButton &&
+  startGameButton &&
   pauseContinueButton &&
   pauseRestartButton &&
   pauseChangeModeButton &&
-  winChangeModeButton
+  winChangeModeButton &&
+  gameOverChangeModeButton
 ) {
   const ctx = canvas.getContext("2d");
   if (ctx)
@@ -590,14 +675,20 @@ if (
       pauseOverlay,
       gameOverCatchesEl,
       gameOverBestEl,
+      gameOverCornersLine,
+      gameOverCornersEl,
       winCatchesEl,
       winBestEl,
       modeSelectOverlay,
-      easyModeButton,
-      hardModeButton,
+      selectNormalButton,
+      selectEndlessButton,
+      selectEasyButton,
+      selectHardButton,
+      startGameButton,
       pauseContinueButton,
       pauseRestartButton,
       pauseChangeModeButton,
       winChangeModeButton,
+      gameOverChangeModeButton,
     );
 }
