@@ -396,7 +396,8 @@ function initGame(
   }
 
   /**
-   * Always-visible top-left readout: "CATCHES: n" in both modes, plus
+   * Top-left readout, shown once the mode-select screen has been dismissed:
+   * "CATCHES: n" in both modes, plus
    * "CORNERS: n" in Endless Mode only, then "BEST: n" (or "—" before any
    * record this session) — BEST reflects the session's fewest-catches win in
    * Normal Mode, or its highest corner tally in Endless Mode.
@@ -429,8 +430,10 @@ function initGame(
     ctx.fillStyle = "#e6e6f0";
     ctx.fillRect(paddle.x, paddle.y, paddle.w, paddle.h);
 
-    drawScoreHud(score, gameMode);
-    if (modeChosen) drawModeHud(gameMode, difficulty);
+    if (modeChosen) {
+      drawScoreHud(score, gameMode);
+      drawModeHud(gameMode, difficulty);
+    }
     drawSpeedBoostHud(speedBoostRemainingMs(speedBoost, gameTime));
   }
 
