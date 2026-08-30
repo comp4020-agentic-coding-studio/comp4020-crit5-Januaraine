@@ -174,6 +174,14 @@ function initGame(
   let pendingGameMode: GameMode = DEFAULT_GAME_MODE;
   let pendingDifficulty: Difficulty = DEFAULT_DIFFICULTY;
   let modeChosen = false;
+  // main.win is a level (stays true every frame the logo sits inside the
+  // corner win-zone/on the corner), not a one-shot event — Normal Mode never
+  // notices because it ends the run the instant win first fires. Endless
+  // Mode keeps running, so without this edge-detector a single corner visit
+  // that spans multiple frames would score once per frame. Sets on the
+  // false->true transition, clears once win goes false again (logo has left
+  // the corner), so re-entering the corner later scores exactly once more.
+  let inCornerZone = false;
   // Tracks the single in-flight requestAnimationFrame callback. The loop
   // keeps re-scheduling itself every frame even while paused (so `lastTime`
   // stays fresh and resuming doesn't see a huge dt) — so anything that
@@ -254,6 +262,7 @@ function initGame(
     lastTrailSampleAt = -Infinity;
     input = createInputState();
     flashUntil = 0;
+    inCornerZone = false;
     running = true;
     paused = false;
     overlay.hidden = true;
@@ -473,9 +482,15 @@ function initGame(
     // Endless Mode reuses the exact same difficulty-gated corner detection
     // (main.win) as Normal Mode, but treats it as a scoring event instead of
     // an end condition — score the corner here, then let the run continue;
-    // the win-ending branch below only fires outside Endless Mode.
-    if (main.win && gameMode === "endless") {
-      score = recordCornerHit(score);
+    // the win-ending branch below only fires outside Endless Mode. main.win
+    // stays true every frame the logo remains in the corner, so this only
+    // scores on the false->true edge (see inCornerZone above) — otherwise a
+    // single visit spanning several frames would award several points.
+    if (gameMode === "endless") {
+      if (main.win && !inCornerZone) {
+        score = recordCornerHit(score);
+      }
+      inCornerZone = main.win;
     }
 
     if (main.bounced) {
