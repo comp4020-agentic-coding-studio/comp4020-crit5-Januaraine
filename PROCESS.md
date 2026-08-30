@@ -1,70 +1,21 @@
 # Process overview
 
-<!-- TEMPLATE: this file is a shape to fill in, not a form. Replace everything
-     in it with your own overview, and delete this comment — `pnpm
-     check:evidence` will remind you if it's still here. -->
-
-A reading-guide to how the work came together --- a map to your process, not an
-essay about it. Markers read this file and follow its citations; they don't
-trawl the repo for evidence you didn't point at, so if a moment mattered, cite
-it.
-
-This file is the shape; the course site's
-[assessment page](https://comp.anu.edu.au/courses/comp4020-agentic-coding-studio/topics/assessment/#what-you-submit)
-is the requirement, and its
-[word counts](https://comp.anu.edu.au/courses/comp4020-agentic-coding-studio/topics/assessment/#word-counts)
-cover every deliverable.
-
 ## What I built
 
-One paragraph: the thing, and the idea behind it.
+I built CORNER HIT, a minimalist browser game inspired by the classic DVD logo screensaver. The original idea was simple: the DVD logo continuously moves around the screen, while the player controls a paddle to keep it from falling off the bottom. In Normal Mode, the goal is to successfully bounce the logo until it reaches a corner. The player can choose Easy or Hard difficulty, where Easy allows a small tolerance around the corner while Hard requires a more accurate corner hit. I also added Endless Mode, where reaching a corner does not end the game but instead increases the corner count, allowing the player to continue until they miss the paddle. The game uses keyboard and mouse input, pause and restart controls, temporary in-memory best scores, speed-up effects, and responsive resizing so that the entire browser window acts as the game area. The animation is driven frame by frame, following the general Canvas animation approach of updating object positions, checking collisions, and redrawing the scene.
 
 ## The moments that mattered
+### Moment 1: Fixing the collision and bounce behaviour
 
-Three or four for an assignment; fewer is fine for a weekly prototype. Keep the
-list short so each moment has room to do all four jobs:
+1. **what happened**: The most technically difficult moment was tuning the collision between the DVD logo and the paddle. Initially, the logo could become extremely slow after hitting the paddle, or its trajectory could become almost completely horizontal. This made the game feel broken because the player could no longer reliably control where the logo would travel. I also noticed that the visual DVD text and its collision area did not match closely enough, so the logo could appear to hit the edge before the collision was actually detected.
+2. **what you did instead of the obvious thing**: Instead of simply increasing the velocity whenever the logo became too slow, I changed the bounce calculation itself. The paddle collision was redesigned around the **relative horizontal position of the logo on the paddle**. The incoming speed was preserved while the collision position determined the outgoing angle. I also introduced minimum and maximum speed limits and restricted the bounce angle so that the vertical component could never become too small.
+3. **how you knew it was right**: The important test was not just whether the logo bounced, but whether it behaved consistently after different types of paddle hits. The new approach preserved the magnitude of velocity while changing its direction according to the collision position. This follows the general principle that collision detection and collision response should be treated as separate parts of the game physics. Using an appropriate hitbox is also a standard technique in 2D games because pixel-perfect collision is often unnecessary.
+4. **the citation**:['1bf4968...9e9a63d'](https://github.com/comp4020-agentic-coding-studio/comp4020-crit5-Januaraine/compare/1bf4968...9e9a63d)
 
-1. **what happened** --- the problem, or the thing that went wrong
-2. **what you did instead of the obvious thing** --- the call you made, and why
-   it beat the obvious one
-3. **how you knew it was right** --- the check you ran, the viewport you looked
-   at, what you read before accepting the diff
-4. **the citation** --- a commit or commit range, a `CLAUDE.md` change, a check
-   that went from red to green, a prompt paired with the commit it produced
 
-Jobs 2 and 3 are the ones the repo can't tell a reader on its own, so they're
-where the marks are. The strongest moments are the ones where a correction
-landed in the **harness** --- the standards and checks your work has to satisfy
---- rather than in a retry: a rule added to `CLAUDE.md`, a check wired up, an
-attempt thrown away. Retrying until it passes is the routine case, and changing
-what the work runs against is the skilled one.
+### Moment 2: Making the interaction and presentation responsive
 
-Cite each moment as a link whose text is the commit hash or range and whose
-target is this repo's commit or compare URL, so a reader clicks straight to the
-evidence:
-
-- one commit: [`a1b2c3d`](https://github.com/YOUR-ORG/YOUR-REPO/commit/a1b2c3d)
-- a range:
-  [`a1b2c3d...e4f5a6b`](https://github.com/YOUR-ORG/YOUR-REPO/compare/a1b2c3d...e4f5a6b)
-
-To pair a prompt with the commit it produced, quote the prompt (curated, not a
-full transcript) next to the citation:
-
-> the prompt, verbatim
-
-Screenshots are welcome where one carries the verification better than a
-sentence does. Commit the file to this repo and link it with a **relative**
-path, which is what makes it render on GitHub: `![alt text](docs/before.png)`.
-Images don't count towards the word count and don't replace the citation.
-
-## Before you ship
-
-`pnpm check:evidence` verifies your citations resolve to real commits, that a
-reflection entry the marker reads is in `reflections/`, and that your
-`CLAUDE.md` is there --- before a marker ever opens the file. It checks that
-your map is traceable, not that it is good: the marker judges whether your
-small, deliberately chosen set of moments shows real judgement and reflection. A
-green check is not a substitute for that curation.
-
-Images aren't checked: unlike a citation whose SHA doesn't resolve, a broken
-image is visible the moment this file is rendered on GitHub.
+1. **what happened**: The final major moment was discovering that the game behaved differently when the browser window was resized. When the window changed from a small size to a larger size, the paddle could remain at its old position instead of staying near the bottom of the new viewport. This exposed a problem in the relationship between the game coordinates and the actual browser viewport.
+2. **what you did instead of the obvious thing**: Instead of keeping a fixed-size game container and accepting the limitation, I changed the design so that the game uses the full viewport. The game dimensions and collision boundaries are recalculated when the browser size changes. The paddle is therefore positioned relative to the current bottom edge rather than relying on a fixed coordinate from the original window size.
+3. **how you knew it was right**: I tested the game by repeatedly changing the browser window size in both directions. The important criterion was that the paddle and collision boundaries continued to correspond to the visible play area. This also improved the overall presentation because there was no longer a separate “game box” competing with the game itself. Responsive canvas design requires the drawing and coordinate system to account for the actual displayed size of the canvas, and animation should be driven by the browser's rendering cycle rather than assuming a fixed screen size.
+4. **the citation**:['5ac5ff6'](https://github.com/comp4020-agentic-coding-studio/comp4020-crit5-Januaraine/commit/5ac5ff6)
